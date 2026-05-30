@@ -2,9 +2,10 @@
  * ATP-RMS-V2 — App Shell
  * TODO: Connect real MQTT broker URL from environment config
  */
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useFleetStore } from '@/store/fleet.store'
 import { loadMap } from '@/services/map.service'
+import { simulationService } from '@/services/simulation.service'
 import { RobotList }    from '@/components/sidebar/RobotList'
 import { VdaStream }    from '@/components/panels/VdaStream'
 import { MetricsPanel } from '@/components/panels/MetricsPanel'
@@ -15,10 +16,19 @@ import { useMapTransform } from '@/hooks/useMapTransform'
 export default function App() {
   const { map, setMap, robots, mqttLog, metrics, mapConfig, setMapConfig, selectedRobotId, setSelectedRobotId } = useFleetStore()
   const ctrl = useMapTransform(map)
+  const [simOn, setSimOn] = useState(false)
 
   useEffect(() => {
     loadMap('/maps/origin_20260120205139.json').then(setMap).catch(console.error)
   }, [])
+
+  const toggleSim = () => {
+    if (!map) return
+    if (simulationService.running) { simulationService.stop(); setSimOn(false) }
+    else { simulationService.start(map); setSimOn(true) }
+  }
+
+  useEffect(() => () => simulationService.stop(), [])
 
   const robotList = [...robots.values()]
 
@@ -38,7 +48,14 @@ export default function App() {
           ))}
         </div>
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
-          <span style={{ fontFamily: 'Share Tech Mono', fontSize: 9, color: '#00ff88', border: '1px solid rgba(0,255,136,0.4)', padding: '2px 7px', borderRadius: 2 }}>● MQTT LIVE</span>
+          <button onClick={toggleSim}
+            style={{ fontFamily: 'Share Tech Mono', fontSize: 9, cursor: 'pointer',
+              color: simOn ? '#00ff88' : '#5a7080',
+              border: `1px solid ${simOn ? 'rgba(0,255,136,0.4)' : '#152030'}`,
+              background: simOn ? 'rgba(0,255,136,0.08)' : 'transparent',
+              padding: '2px 7px', borderRadius: 2 }}>
+            {simOn ? '● SIM RUNNING' : '○ START SIM'}
+          </button>
           <span style={{ fontFamily: 'Share Tech Mono', fontSize: 9, color: '#00d4ff', border: '1px solid rgba(0,212,255,0.4)', padding: '2px 7px', borderRadius: 2 }}>VDA5050 v2.0</span>
         </div>
       </div>
