@@ -8,11 +8,16 @@ export function useMapTransform(map: FleetMap | null) {
   const [transform, setTransform] = useState<Transform>({ scale: 1, offsetX: 0, offsetY: 0 })
   const isDragging = useRef(false)
   const lastPos    = useRef({ x: 0, y: 0 })
+  const sizeRef    = useRef({ w: 0, h: 0 })
 
-  const fitToCanvas = useCallback((canvasW: number, canvasH: number) => {
+  const fitToCanvas = useCallback((canvasW?: number, canvasH?: number) => {
     if (!map) return
+    const w = canvasW ?? sizeRef.current.w
+    const h = canvasH ?? sizeRef.current.h
+    if (canvasW && canvasH) sizeRef.current = { w: canvasW, h: canvasH }
+    if (!w || !h) return
     const b = getMapBounds(map)
-    setTransform(fitTransform(b.width, b.height, b.minX, b.minY, canvasW, canvasH))
+    setTransform(fitTransform(b.width, b.height, b.minX, b.minY, w, h))
   }, [map])
 
   const handleWheel = useCallback((e: WheelEvent, pivotX: number, pivotY: number) => {

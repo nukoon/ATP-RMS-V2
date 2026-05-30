@@ -7,15 +7,15 @@ import type { FleetMap, Robot, MapViewConfig } from '@/types'
 import type { Transform } from '@/utils/canvas'
 import { worldToScreen, thetaToScreenRot } from '@/utils/canvas'
 import { STATUS_COLOR, AGV_ASSET_PATH } from '@/constants'
+import type { useMapTransform } from '@/hooks/useMapTransform'
 
 interface Props {
   map:       FleetMap
   robots:    Robot[]
-  transform: Transform
   config:    MapViewConfig
   selectedRobotId: string | null
   onRobotClick:  (id: string | null) => void
-  onTransformChange: (t: Transform) => void
+  ctrl: ReturnType<typeof useMapTransform>
 }
 
 // Image cache
@@ -29,54 +29,114 @@ function getCachedImg(src: string): HTMLImageElement {
   return imgCache.get(src)!
 }
 
-export function MapCanvas({ map, robots, transform, config, selectedRobotId, onRobotClick }: Props) {
+export function MapCanvas({ map, robots, config, selectedRobotId, onRobotClick, ctrl }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const animRef   = useRef<number>()
-  const t = transform
+  const t = ctrl.transform
+  const tRef = useRef(t)
+  tRef.current = t
+  const fittedRef = useRef(false)
+  const movedRef  = useRef(false)
+
+  // Keep canvas pixel size in sync with its CSS box; fit map on first size
+  useEffect(() => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const resize = () => {
+      const { clientWidth: w, clientHeight: h } = canvas
+      if (w && h && (canvas.width !== w || canvas.height !== h)) {
+        canvas.width = w
+        canvas.height = h
+      }
+      if (!fittedRef.current && w && h && map) {
+        ctrl.fitToCanvas(w, h)
+        fittedRef.current = true
+      }
+    }
+    resize()
+    const ro = new ResizeObserver(resize)
+    ro.observe(canvas)
+    return () => ro.disconnect()
+  }, [map, ctrl])
 
   // Draw loop
   const draw = useCallback(() => {
     const canvas = canvasRef.current
     if (!canvas) return
     const ctx = canvas.getContext('2d')!
+    const tt = tRef.current
     ctx.clearRect(0, 0, canvas.width, canvas.height)
 
-    drawGrid(ctx, canvas.width, canvas.height, t)
-    drawZones(ctx, map, t, config)
-    drawEdges(ctx, map, t, config)
-    robots.forEach(r => drawRobotPath(ctx, map, r, t, config))
-    drawNodes(ctx, map, t, config)
-    robots.forEach(r => drawRobot(ctx, r, t, config, selectedRobotId))
+    drawGrid(ctx, canvas.width, canvas.height, tt)
+    drawZones(ctx, map, tt, config)
+    drawEdges(ctx, map, tt, config)
+    robots.forEach(r => drawRobotPath(ctx, map, r, tt, config))
+    drawNodes(ctx, map, tt, config)
+    robots.forEach(r => drawRobot(ctx, r, tt, config, selectedRobotId))
 
     animRef.current = requestAnimationFrame(draw)
-  }, [map, robots, transform, config, selectedRobotId])
+  }, [map, robots, config, selectedRobotId])
 
   useEffect(() => {
     animRef.current = requestAnimationFrame(draw)
     return () => { if (animRef.current) cancelAnimationFrame(animRef.current) }
   }, [draw])
 
-  // Click → robot selection
-  const handleClick = useCallback((e: React.MouseEvent) => {
+  // Wheel zoom (non-passive so we can preventDefault)
+  useEffect(() => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const onWheel = (e: WheelEvent) => {
+      const rect = canvas.getBoundingClientRect()
+      ctrl.handleWheel(e, e.clientX - rect.left, e.clientY - rect.top)
+    }
+    canvas.addEventListener('wheel', onWheel, { passive: false })
+    return () => canvas.removeEventListener('wheel', onWheel)
+  }, [ctrl])
+
+  const pos = (e: React.MouseEvent) => {
     const rect = canvasRef.current!.getBoundingClientRect()
-    const mx = e.clientX - rect.left
-    const my = e.clientY - rect.top
+    return { x: e.clientX - rect.left, y: e.clientY - rect.top }
+  }
+
+  const onMouseDown = useCallback((e: React.MouseEvent) => {
+    movedRef.current = false
+    const { x, y } = pos(e)
+    ctrl.handleMouseDown(x, y)
+  }, [ctrl])
+
+  const onMouseMove = useCallback((e: React.MouseEvent) => {
+    if (e.buttons === 1) movedRef.current = true
+    const { x, y } = pos(e)
+    ctrl.handleMouseMove(x, y)
+  }, [ctrl])
+
+  const onMouseUp = useCallback(() => ctrl.handleMouseUp(), [ctrl])
+
+  // Click → robot selection (suppressed if the click was a drag)
+  const handleClick = useCallback((e: React.MouseEvent) => {
+    if (movedRef.current) return
+    const { x: mx, y: my } = pos(e)
     const hitR = Math.max(14, config.robotSize * 0.6)
     for (const r of robots) {
-      const { sx, sy } = worldToScreen(r.pose.x, r.pose.y, t)
+      const { sx, sy } = worldToScreen(r.pose.x, r.pose.y, tRef.current)
       if (Math.hypot(mx - sx, my - sy) < hitR) {
         onRobotClick(selectedRobotId === r.id ? null : r.id)
         return
       }
     }
     onRobotClick(null)
-  }, [robots, t, config.robotSize, selectedRobotId, onRobotClick])
+  }, [robots, config.robotSize, selectedRobotId, onRobotClick])
 
   return (
     <canvas
       ref={canvasRef}
       style={{ width: '100%', height: '100%', display: 'block', cursor: 'grab' }}
       onClick={handleClick}
+      onMouseDown={onMouseDown}
+      onMouseMove={onMouseMove}
+      onMouseUp={onMouseUp}
+      onMouseLeave={onMouseUp}
     />
   )
 }

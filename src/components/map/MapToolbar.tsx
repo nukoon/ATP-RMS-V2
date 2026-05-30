@@ -1,6 +1,5 @@
 import type { MapViewConfig } from '@/types'
 import type { AgvModel } from '@/types'
-import { AGV_MODELS } from '@/constants'
 
 interface Props {
   config: MapViewConfig

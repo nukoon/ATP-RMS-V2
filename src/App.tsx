@@ -9,10 +9,12 @@ import { RobotList }    from '@/components/sidebar/RobotList'
 import { VdaStream }    from '@/components/panels/VdaStream'
 import { MetricsPanel } from '@/components/panels/MetricsPanel'
 import { MapToolbar }   from '@/components/map/MapToolbar'
-// import { MapCanvas } from '@/components/map/MapCanvas'  // TODO: wire transform
+import { MapCanvas }    from '@/components/map/MapCanvas'
+import { useMapTransform } from '@/hooks/useMapTransform'
 
 export default function App() {
   const { map, setMap, robots, mqttLog, metrics, mapConfig, setMapConfig, selectedRobotId, setSelectedRobotId } = useFleetStore()
+  const ctrl = useMapTransform(map)
 
   useEffect(() => {
     loadMap('/maps/origin_20260120205139.json').then(setMap).catch(console.error)
@@ -43,9 +45,9 @@ export default function App() {
 
       {/* TOOLBAR */}
       <MapToolbar
-        config={mapConfig} zoom={1}
+        config={mapConfig} zoom={ctrl.transform.scale}
         onChange={setMapConfig}
-        onZoomIn={() => {}} onZoomOut={() => {}} onFit={() => {}}
+        onZoomIn={ctrl.zoomIn} onZoomOut={ctrl.zoomOut} onFit={ctrl.fitToCanvas}
       />
 
       {/* MAIN */}
@@ -58,16 +60,19 @@ export default function App() {
           <RobotList robots={robotList} selectedId={selectedRobotId} onSelect={setSelectedRobotId} />
         </div>
 
-        {/* MAP AREA — TODO: replace with <MapCanvas> */}
-        <div style={{ flex: 1, background: '#060a10', display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative' }}>
+        {/* MAP AREA */}
+        <div style={{ flex: 1, background: '#060a10', position: 'relative', overflow: 'hidden' }}>
           {map ? (
-            <div style={{ color: '#5a7080', fontFamily: 'Share Tech Mono', fontSize: 12, textAlign: 'center' }}>
-              <div style={{ fontSize: 24, marginBottom: 8 }}>🗺️</div>
-              <div>Map loaded: {map.points.length} nodes, {map.curves.length} edges</div>
-              <div style={{ fontSize: 10, marginTop: 4, color: '#3a5060' }}>Wire MapCanvas here with useMapTransform hook</div>
-            </div>
+            <MapCanvas
+              map={map}
+              robots={robotList}
+              config={mapConfig}
+              selectedRobotId={selectedRobotId}
+              onRobotClick={setSelectedRobotId}
+              ctrl={ctrl}
+            />
           ) : (
-            <div style={{ color: '#3a5060', fontFamily: 'Share Tech Mono', fontSize: 11 }}>Loading map...</div>
+            <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#3a5060', fontFamily: 'Share Tech Mono', fontSize: 11 }}>Loading map...</div>
           )}
         </div>
 
