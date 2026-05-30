@@ -24,6 +24,7 @@ interface FleetStore {
   orders:      FleetOrder[]
   setOrders:   (orders: FleetOrder[]) => void
   updateOrder: (id: string, patch: Partial<FleetOrder>) => void
+  recordOrderCompleted: () => void
 
   // MQTT Log (ring buffer, max 100)
   mqttLog:     MqttLogEntry[]
@@ -52,6 +53,9 @@ const INITIAL_METRICS: FleetMetrics = {
   utilization: 0, totalDistance: 0,
 }
 
+// Rolling window of order-completion timestamps (ms), for throughput/hr
+const completionTimes: number[] = []
+
 export const useFleetStore = create<FleetStore>()(
   subscribeWithSelector((set, get) => ({
     map: null,
@@ -72,6 +76,11 @@ export const useFleetStore = create<FleetStore>()(
         const robots = new Map(s.robots)
         const existing = robots.get(robotId)
         if (!existing) return s
+        // accumulate travelled distance from pose delta (ignore teleports > 5m/tick)
+        const dx = state.agvPosition.x - existing.pose.x
+        const dy = state.agvPosition.y - existing.pose.y
+        const step = Math.hypot(dx, dy)
+        const moved = step < 5 ? step : 0
         const updated: Robot = {
           ...existing,
           status:        state.operatingMode as AgvStatus,
@@ -81,6 +90,7 @@ export const useFleetStore = create<FleetStore>()(
           currentNodeId: state.lastNodeId,
           currentOrderId: state.orderId || null,
           errors:        state.errors,
+          totalDistance: existing.totalDistance + moved,
           lastUpdated:   Date.now(),
         }
         robots.set(robotId, updated)
@@ -93,6 +103,10 @@ export const useFleetStore = create<FleetStore>()(
     setOrders: (orders) => set({ orders }),
     updateOrder: (id, patch) =>
       set(s => ({ orders: s.orders.map(o => o.id === id ? { ...o, ...patch } : o) })),
+    recordOrderCompleted: () => {
+      completionTimes.push(Date.now())
+      get().recomputeMetrics()
+    },
 
     mqttLog: [],
     pushMqttLog: (entry) =>
@@ -120,6 +134,9 @@ export const useFleetStore = create<FleetStore>()(
       const avgBat    = robots.length ? robots.reduce((a, r) => a + r.battery.batteryCharge, 0) / robots.length : 0
       const totalDist = robots.reduce((a, r) => a + r.totalDistance, 0)
       const util      = robots.length ? active / robots.length : 0
+      // throughput = orders completed in the last hour (rolling)
+      const cutoff = Date.now() - 3600_000
+      while (completionTimes.length && completionTimes[0] < cutoff) completionTimes.shift()
       set({
         metrics: {
           ...get().metrics,
@@ -128,6 +145,8 @@ export const useFleetStore = create<FleetStore>()(
           avgBattery: Math.round(avgBat),
           utilization: util,
           totalDistance: totalDist,
+          throughputPerHour: completionTimes.length,
+          ordersCompleted: completionTimes.length,
         }
       })
     },

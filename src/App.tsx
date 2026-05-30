@@ -14,7 +14,7 @@ import { MapCanvas }    from '@/components/map/MapCanvas'
 import { useMapTransform } from '@/hooks/useMapTransform'
 
 export default function App() {
-  const { map, setMap, robots, mqttLog, metrics, mapConfig, setMapConfig, selectedRobotId, setSelectedRobotId } = useFleetStore()
+  const { map, setMap, robots, mqttLog, metrics, mapConfig, setMapConfig, selectedRobotId, setSelectedRobotId, mqttConnected, mqttLatency } = useFleetStore()
   const ctrl = useMapTransform(map)
   const [simOn, setSimOn] = useState(false)
 
@@ -110,6 +110,9 @@ export default function App() {
       <div style={{ background: '#0a1520', borderTop: '1px solid #152030', padding: '3px 12px', display: 'flex', gap: 14, fontFamily: 'Share Tech Mono', fontSize: 9, color: '#5a7080', alignItems: 'center', flexShrink: 0 }}>
         <span>MAP: <span style={{ color: '#00d4ff' }}>origin_20260120205139.json</span></span>
         <span>LM:<span style={{ color: '#00d4ff' }}>{map?.points.filter(p=>p.cls==='LocationMark').length ?? 0}</span> AP:<span style={{ color: '#00d4ff' }}>{map?.points.filter(p=>p.cls==='ActionPoint').length ?? 0}</span></span>
+        <span>MQTT: <span style={{ color: mqttConnected ? '#00ff88' : '#ff4444' }}>{mqttConnected ? 'CONNECTED' : 'OFFLINE'}</span></span>
+        <span>Latency: <span style={{ color: '#00d4ff' }}>{mqttConnected ? `${mqttLatency}ms` : '—'}</span></span>
+        <span>Fleet: <span style={{ color: '#00d4ff' }}>{robots.size}</span></span>
         <span style={{ marginLeft: 'auto' }}>ATP-RMS-V2 v0.1.0</span>
       </div>
     </div>
