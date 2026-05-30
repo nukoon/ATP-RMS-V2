@@ -1,7 +1,7 @@
-# AiTEN Fleet Digital Twin
+# ATP-RMS-V2
 
-Real-time Fleet Management Dashboard สำหรับ AMR ของ AiTEN  
-รองรับ **VDA5050 v2.0** ผ่าน MQTT · แผนที่จาก AiTEN map format
+Real-time Fleet Management Dashboard สำหรับ AMR ของ ATP  
+รองรับ **VDA5050 v2.0** ผ่าน MQTT · แผนที่จาก ATP map format
 
 ![Stack](https://img.shields.io/badge/React-18-blue) ![TypeScript](https://img.shields.io/badge/TypeScript-5-blue) ![VDA5050](https://img.shields.io/badge/VDA5050-v2.0-green) ![MQTT](https://img.shields.io/badge/MQTT-5-orange)
 
@@ -11,8 +11,8 @@ Real-time Fleet Management Dashboard สำหรับ AMR ของ AiTEN
 
 ```bash
 # 1. Clone
-git clone https://github.com/AutomationPro/aiten-fleet-dt.git
-cd aiten-fleet-dt
+git clone https://github.com/AutomationPro/ATP-RMS-V2.git
+cd ATP-RMS-V2
 
 # 2. Install
 npm install
@@ -36,7 +36,7 @@ npm run build
 | Variable | ค่าตัวอย่าง | คำอธิบาย |
 |---|---|---|
 | `VITE_MQTT_BROKER_URL` | `ws://192.168.1.100:9001` | MQTT broker WebSocket URL |
-| `VITE_MQTT_MANUFACTURER` | `AiTEN` | VDA5050 manufacturer name |
+| `VITE_MQTT_MANUFACTURER` | `ATP` | VDA5050 manufacturer name |
 | `VITE_API_BASE_URL` | `http://192.168.1.100:8080` | Backend REST API |
 
 ---
@@ -44,12 +44,12 @@ npm run build
 ## Project Structure
 
 ```
-aiten-fleet-dt/
+ATP-RMS-V2/
 ├── public/
 │   ├── assets/
 │   │   ├── agv/          ← SVG icons per model+status (AM15, MP10S, …)
 │   │   ├── board/        ← UI icons
-│   │   ├── brand/        ← AiTEN logo, favicon
+│   │   ├── brand/        ← ATP logo, favicon
 │   │   └── icons/        ← Map element icons (chargeStation, autodoor)
 │   └── maps/             ← Map JSON files
 ├── src/
@@ -82,7 +82,7 @@ allow_anonymous true
 
 ## Map Format
 
-ใช้ AiTEN map format (`advancedPointList` / `advancedCurveList`)  
+ใช้ ATP map format (`advancedPointList` / `advancedCurveList`)  
 วางไฟล์ `.json` ไว้ที่ `public/maps/` แล้วแก้ URL ใน `App.tsx`
 
 ---
@@ -98,4 +98,4 @@ allow_anonymous true
 ---
 
 ## License
-© 2026 Automation Pro Co., Ltd. (AiTEN) — Internal use only
+© 2026 Automation Pro Co., Ltd. (ATP) — Internal use only

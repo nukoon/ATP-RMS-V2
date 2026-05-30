@@ -1,6 +1,6 @@
 /**
  * MapService — Loads and parses VDA5050-compatible map JSON
- * Supports AiTEN map format (advancedPointList / advancedCurveList)
+ * Supports ATP map format (advancedPointList / advancedCurveList)
  */
 import type { FleetMap, MapPoint, MapCurve, MapArea, NodeClass } from '@/types'
 

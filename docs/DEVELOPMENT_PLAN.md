@@ -1,10 +1,10 @@
-# AiTEN Fleet Digital Twin — Development Plan (4 Weeks)
+# ATP-RMS-V2 — Development Plan (4 Weeks)
 
 ## Goal
 Production-ready Fleet Management Digital Twin ที่:
 - แสดง AMR position real-time ผ่าน VDA5050 v2.0 / MQTT
-- ใช้ map จริงจาก AiTEN system (`.json` format)
-- แสดง robot model SVG จาก AiTEN asset ถูก model/status
+- ใช้ map จริงจาก ATP system (`.json` format)
+- แสดง robot model SVG จาก ATP asset ถูก model/status
 - รองรับ 10+ robots พร้อมกัน, refresh < 100ms
 
 ---

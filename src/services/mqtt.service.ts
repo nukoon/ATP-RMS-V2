@@ -11,7 +11,7 @@ export interface MqttConfig {
   brokerUrl: string       // e.g. "ws://192.168.1.100:9001"
   username?: string
   password?: string
-  manufacturer: string   // e.g. "AiTEN"
+  manufacturer: string   // e.g. "ATP"
 }
 
 type StateCallback   = (robotId: string, state: VDA5050State) => void
@@ -31,7 +31,7 @@ export class MqttService {
     this.client = mqtt.connect(config.brokerUrl, {
       username: config.username,
       password: config.password,
-      clientId: `aiten-fleet-dt-${Date.now()}`,
+      clientId: `atp-rms-v2-${Date.now()}`,
       reconnectPeriod: 3000,
       connectTimeout: 10000,
     })
@@ -71,7 +71,7 @@ export class MqttService {
   }
 
   private buildTopic(robotId: string, topic: VDA5050Topic): string {
-    const mfr = this.config?.manufacturer ?? 'AiTEN'
+    const mfr = this.config?.manufacturer ?? 'ATP'
     return `${MQTT_BASE_TOPIC}/${mfr}/${robotId}/${topic}`
   }
 

@@ -1,5 +1,5 @@
 /**
- * AiTEN Fleet Digital Twin — App Shell
+ * ATP-RMS-V2 — App Shell
  * TODO: Connect real MQTT broker URL from environment config
  */
 import { useEffect } from 'react'
@@ -24,7 +24,7 @@ export default function App() {
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: '#060a10', color: '#c8d8e8', fontFamily: 'Rajdhani, sans-serif' }}>
       {/* TOP BAR */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '6px 14px', background: '#0a1520', borderBottom: '1px solid #152030', flexShrink: 0 }}>
-        <img src="/assets/brand/logo_aiten.png" style={{ height: 28, objectFit: 'contain' }} />
+        <img src="/assets/brand/logo_atp.png" style={{ height: 28, objectFit: 'contain' }} />
         <span style={{ width: 1, height: 20, background: '#152030', margin: '0 4px' }} />
         <span style={{ fontFamily: 'Share Tech Mono', fontSize: 9, color: '#5a7080', letterSpacing: 2 }}>DIGITAL TWIN · FLEET MANAGEMENT</span>
         <div style={{ display: 'flex', gap: 14, marginLeft: 8 }}>
@@ -88,7 +88,7 @@ export default function App() {
       <div style={{ background: '#0a1520', borderTop: '1px solid #152030', padding: '3px 12px', display: 'flex', gap: 14, fontFamily: 'Share Tech Mono', fontSize: 9, color: '#5a7080', alignItems: 'center', flexShrink: 0 }}>
         <span>MAP: <span style={{ color: '#00d4ff' }}>origin_20260120205139.json</span></span>
         <span>LM:<span style={{ color: '#00d4ff' }}>{map?.points.filter(p=>p.cls==='LocationMark').length ?? 0}</span> AP:<span style={{ color: '#00d4ff' }}>{map?.points.filter(p=>p.cls==='ActionPoint').length ?? 0}</span></span>
-        <span style={{ marginLeft: 'auto' }}>AiTEN Fleet DT v0.1.0</span>
+        <span style={{ marginLeft: 'auto' }}>ATP-RMS-V2 v0.1.0</span>
       </div>
     </div>
   )

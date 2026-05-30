@@ -1,5 +1,5 @@
 // ============================================================
-// AiTEN Fleet Digital Twin — Core Type Definitions
+// ATP-RMS-V2 — Core Type Definitions
 // VDA5050 v2.0 compliant
 // ============================================================
 

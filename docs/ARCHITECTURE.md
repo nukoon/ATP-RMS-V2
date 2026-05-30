@@ -1,4 +1,4 @@
-# AiTEN Fleet Digital Twin — Architecture
+# ATP-RMS-V2 — Architecture
 
 ## Stack
 | Layer | Technology | ทำไม |
@@ -38,7 +38,7 @@ src/
 ├── constants/      — Status colors, asset paths, defaults
 ├── services/
 │   ├── mqtt.service.ts   — MQTT broker connection
-│   └── map.service.ts    — Load & parse AiTEN map JSON
+│   └── map.service.ts    — Load & parse ATP map JSON
 ├── store/
 │   └── fleet.store.ts    — Zustand global state
 ├── utils/
