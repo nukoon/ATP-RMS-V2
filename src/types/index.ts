@@ -1,6 +1,10 @@
 // ============================================================
 // ATP-RMS-V2 — Core Type Definitions
 // VDA5050 v2.0 compliant
+//
+// Domain types adapted from the legacy AIPA RDS v2 live in ./fleet.ts
+// (import them from '@/types/fleet'). They are kept in a separate module
+// to avoid a circular re-export with the base types declared here.
 // ============================================================
 
 // ── Map Types ──────────────────────────────────────────────

@@ -7,6 +7,7 @@
 import type { FleetMap, MapCurve, AgvModel, AgvStatus, VDA5050State } from '@/types'
 import { useFleetStore } from '@/store/fleet.store'
 import { calcTheta } from '@/utils/canvas'
+import { speedMaxOf } from '@/constants/agv-specs'
 
 interface SimBot {
   id: string
@@ -14,6 +15,7 @@ interface SimBot {
   curve: MapCurve
   t: number            // 0..1 progress along current edge
   speed: number        // progress per tick (scaled by edge length)
+  mps: number          // this model's real top speed (m/s)
   battery: number
   status: AgvStatus
   lastLog: number      // ms timestamp of last VDA stream entry
@@ -28,7 +30,6 @@ const FLEET: { id: string; model: AgvModel }[] = [
 ]
 
 const TICK_MS = 100
-const SPEED_MPS = 1.2          // simulated metres per second
 const KEY = (x: number, y: number) => `${x.toFixed(2)},${y.toFixed(2)}`
 const rand = <T,>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)]
 
@@ -101,9 +102,11 @@ export class SimulationService {
     this.bots = FLEET.map(f => {
       const curve = rand(all)
       const start = pointOnCurve(curve, 0)
+      const mps = speedMaxOf(f.model)
       const bot: SimBot = {
         id: f.id, model: f.model, curve, t: 0,
-        speed: (SPEED_MPS * (TICK_MS / 1000)) / curveLength(curve),
+        mps,
+        speed: (mps * (TICK_MS / 1000)) / curveLength(curve),
         battery: 60 + Math.random() * 40,
         status: 'EXECUTING',
         lastLog: 0,
@@ -141,7 +144,7 @@ export class SimulationService {
         // reached the end of this edge → count it as a completed leg, hop on
         store.recordOrderCompleted()
         b.curve = this.nextCurve(b.curve, all)
-        b.speed = (SPEED_MPS * (TICK_MS / 1000)) / curveLength(b.curve)
+        b.speed = (b.mps * (TICK_MS / 1000)) / curveLength(b.curve)
         b.t = 0
         b.battery = Math.max(5, b.battery - 0.4)
         b.status = b.battery < 15 ? 'CHARGING' : 'EXECUTING'
@@ -157,7 +160,7 @@ export class SimulationService {
         lastNodeId: '', lastNodeSequenceId: 0,
         driving: b.status === 'EXECUTING',
         agvPosition: { x: pos.x, y: pos.y, theta, mapId: 'sim' },
-        velocity: { vx: SPEED_MPS, vy: 0, omega: 0 },
+        velocity: { vx: b.status === 'EXECUTING' ? b.mps : 0, vy: 0, omega: 0 },
         batteryState: { batteryCharge: Math.round(b.battery), charging: b.status === 'CHARGING' },
         operatingMode: b.status,
         errors: [], warnings: [],
