@@ -8,6 +8,7 @@ import type { FleetMap, MapCurve, AgvModel, AgvStatus, VDA5050State } from '@/ty
 import { useFleetStore } from '@/store/fleet.store'
 import { calcTheta } from '@/utils/canvas'
 import { speedMaxOf } from '@/constants/agv-specs'
+import { FLEET_ROSTER } from '@/constants/fleet-roster'
 
 interface SimBot {
   id: string
@@ -21,13 +22,9 @@ interface SimBot {
   lastLog: number      // ms timestamp of last VDA stream entry
 }
 
-const FLEET: { id: string; model: AgvModel }[] = [
-  { id: 'AMR-001', model: 'AM15' },
-  { id: 'AMR-002', model: 'MP10S' },
-  { id: 'AMR-003', model: 'AM15' },
-  { id: 'AMR-004', model: 'AS15' },
-  { id: 'AMR-005', model: 'TP30' },
-]
+// The real production fleet (aipa_rds.agv_info): 3 APe15 AGVs.
+const FLEET: { id: string; model: AgvModel }[] =
+  FLEET_ROSTER.map(m => ({ id: m.id, model: m.model }))
 
 const TICK_MS = 100
 const KEY = (x: number, y: number) => `${x.toFixed(2)},${y.toFixed(2)}`
