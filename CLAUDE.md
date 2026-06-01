@@ -4,71 +4,76 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-ATP-RMS-V2 — a real-time Fleet Management Dashboard ("Digital Twin") for ATP's autonomous mobile robots (AMRs/AGVs). The browser connects directly to an MQTT broker over WebSocket, consumes **VDA5050 v2.0** messages from the fleet, and renders robots on a **2D canvas** map built from the **ATP map format**. There is no backend in this repo — the MQTT broker is the integration boundary. UI/docs mix English and Thai.
+ATP-RMS-V2 — a real-time Fleet Management Dashboard ("Digital Twin") for ATP's autonomous mobile robots (AMRs/AGVs). The browser talks **VDA5050 v2.0 over MQTT** and renders robots on a **2D canvas** map built from the **ATP map format**. There is no backend in this repo — the MQTT broker is the integration boundary. A built-in **simulator** drives the whole UI without any broker, so the app is fully usable offline. UI/docs mix English and Thai.
 
 ## Commands
 
 ```bash
 npm install          # install dependencies
 npm run dev          # Vite dev server → http://localhost:5173 ( /api proxied to :8080 )
-npm run build        # tsc (type-check) then vite build
+npm run build        # tsc (type-check) then vite build  — run this to verify; it must pass
 npm run preview      # serve the production build
 npm run lint         # eslint src --ext ts,tsx --report-unused-disable-directives
 npm run type-check   # tsc --noEmit
 ```
 
-Requires Node.js 18+ and an MQTT broker with WebSocket enabled (Mosquitto example in [README.md](README.md): TCP `1883` + websockets `9001`). Copy `.env.example` to `.env` first.
+Node.js 18+. **No test runner is configured** — don't assume `npm test`. The build runs `tsc` with `noUnusedLocals`/`noUnusedParameters`, so unused vars/imports fail the build; keep it clean.
 
-**No test runner is configured** — there is no `test` script and no vitest/jest in devDependencies. Don't assume `npm test` exists.
+## Three run modes (top-bar buttons)
 
-## Configuration
-
-Vite env vars, prefixed `VITE_` to reach the client — see [.env.example](.env.example):
-`VITE_MQTT_BROKER_URL`, `VITE_MQTT_USERNAME`, `VITE_MQTT_PASSWORD`, `VITE_MQTT_MANUFACTURER` (`ATP`), `VITE_API_BASE_URL`. Note: the map URL is currently **hardcoded** in [src/App.tsx](src/App.tsx) (`/maps/origin_20260120205139.json`), not driven by env. Path alias `@` → `src/` (see [vite.config.ts](vite.config.ts) and `tsconfig.json`).
+1. **START SIM** — `simulationService` drives 2 AGVs with no broker. This is the default way to see everything working.
+2. **CONNECT** (live) — connects `mqttService` to a real broker using the operator's saved AMR/broker config. Mutually exclusive with SIM (SIM disables while LIVE).
+3. Neither — static map only.
 
 ## Architecture
 
 ```
-AGV ─VDA5050/MQTT─► mqtt.service ─► useFleetStore (Zustand) ─► React components ─► react-konva canvas
-                         ▲
-                  order published back to AGV  (mqttService.sendOrder)
+              ┌─ simulationService ─┐
+AGV ─VDA5050/MQTT─► mqtt.service ──┼─► useFleetStore (Zustand) ─► React (inline-styled HUD) ─► 2D <canvas>
+                                   └─ both feed the SAME store.updateFromVDA5050 pipeline
 ```
 
-Stack: React 18 + TypeScript 5 + Vite, **Zustand** global store, **mqtt.js v5** over WebSocket, **react-konva** for the 2D canvas map (NOT Leaflet / map tiles), **recharts** for charts. Styling is **inline styles + a CSS-variable cyber-HUD theme** (Tailwind/PostCSS are installed but `App.tsx` uses inline styles).
+Stack: React 18 + TypeScript 5 + Vite, **Zustand** stores (`zustand` + `persist`), **mqtt.js v5** over WebSocket, a hand-written **2D canvas** renderer (NOT react-konva/Leaflet despite those being in package.json — the map is drawn imperatively in `MapCanvas.tsx` via `utils/canvas.ts`). Styling is **inline styles, dark cyber-HUD theme** (Tailwind/PostCSS are installed but unused).
 
-Layout is a fixed HUD shell in [src/App.tsx](src/App.tsx): top status bar → `MapToolbar` → (left `RobotList` sidebar | center `MapCanvas` | right `VdaStream` + `MetricsPanel`) → bottom status bar. Source dirs: `components/{map,panels,sidebar,common}`, `hooks/` (`useMapTransform`), `utils/` (`canvas.ts`), `services/`, `store/`, `constants/`, `types/`.
+Key design point: **the simulator and a real broker are interchangeable** — both push synthetic/real VDA5050 `state` into `useFleetStore.updateFromVDA5050`, so every panel works identically in SIM or LIVE.
 
-### MQTT / VDA5050 — the integration contract
+### Layout ([src/App.tsx](src/App.tsx))
+top bar (status pills + CONFIG / CONNECT / START SIM) → `MapToolbar` → **[ left `FleetSidebar` | center `MapCanvas` | right panel ]** → bottom `StatusBar`.
+Right panel = `RobotDetail` when a robot is selected, else tabbed **STREAM / MISSIONS / ALARMS** with `MetricsPanel` pinned below.
 
-[src/services/mqtt.service.ts](src/services/mqtt.service.ts) is a class exported **as a singleton `mqttService`**. Topics follow `${MQTT_BASE_TOPIC}/${manufacturer}/${robotId}/${topic}` where `MQTT_BASE_TOPIC = 'uagv/v2'` and `MQTT_QOS = 1` (both in [src/constants/index.ts](src/constants/index.ts)).
-- `connect(config, robotIds)` subscribes per **explicit robotId** (no `+` wildcard) to `state`, `visualization`, `connection`.
-- A single `message` handler parses JSON and routes `state`/`visualization` payloads to the `onStateUpdate` callback; register callbacks via `onStateUpdate()` / `onConnectionChange()`.
-- `sendOrder(robotId, order)` publishes JSON to the `.../order` topic — the only outbound path.
+### Two Zustand stores
+- **[src/store/fleet.store.ts](src/store/fleet.store.ts)** (`useFleetStore`) — live runtime state: `robots: Map<id,Robot>`, `missions`, `alarms`, `orders`, `mqttLog` (ring 100), `metrics`, `mqttConnected`, UI (`mapConfig`, `selectedRobotId`).
+  - `upsertRobot()` is how a robot first enters; `updateFromVDA5050(id, state)` **only updates an existing robot** (early-returns otherwise), accumulates `totalDistance` from pose delta, then `recomputeMetrics()`.
+  - missions: `addMission/updateMission/cancelMission`; alarms: `pushAlarm` (de-dups active by agvId+code) / `resolveAlarm`.
+- **[src/store/config.store.ts](src/store/config.store.ts)** (`useConfigStore`, **persisted to localStorage** key `atp-rms-config`) — operator setup: registered `amrs` (serial/model/ip/colour), `maps` (builtin + uploaded), active map id, and the MQTT `broker` (WebSocket URL + auth + manufacturer).
 
-### State store
+### MQTT / VDA5050 contract
+[src/services/mqtt.service.ts](src/services/mqtt.service.ts) — singleton `mqttService`. Topics: `${MQTT_BASE_TOPIC}/${manufacturer}/${robotId}/${topic}`, `MQTT_BASE_TOPIC='uagv/v2'`, QoS 1 (in [src/constants/index.ts](src/constants/index.ts)). `connect(config, robotIds)` subscribes per explicit robotId to `state`/`visualization`/`connection`; `sendOrder()` is the only outbound path. **Browsers can only do MQTT over WebSocket** — real robots that speak TCP 1883 need a Mosquitto bridge (TCP listener + `protocol websockets` on 9001). This is surfaced to the user in the Broker config tab.
 
-[src/store/fleet.store.ts](src/store/fleet.store.ts) (`useFleetStore`, Zustand + `subscribeWithSelector`) is the single source of truth: `robots: Map<robotId, Robot>`, plus `map`, `orders`, `mqttLog` (ring buffer capped at 100), `mqttConnected`/`mqttLatency`, derived `metrics`, and UI state (`mapConfig`, `selectedRobotId`).
-- `upsertRobot()` creates/replaces a robot (and is how a robot first enters the store).
-- `updateFromVDA5050(robotId, state)` **only updates an already-existing robot** (early-returns otherwise); it sets `status = state.operatingMode` cast to `AgvStatus`, merges pose/battery/velocity/errors, and preserves the existing `pose.mapId`.
-- Both mutators call `recomputeMetrics()` (counts by status, avg battery, utilization = active/total).
+### Simulator ([src/services/simulation.service.ts](src/services/simulation.service.ts))
+Singleton `simulationService`, the most logic-heavy file. Acts as a mini dispatcher:
+- Builds a **directed node graph** from `map.curves` (each curve carries `sNode`/`eNode`; traversed start→end only, so **one-way edges are respected**).
+- 2 AGVs **park at the map's Charge nodes**; idle = wait & charge there.
+- On a PENDING mission it dispatches the **nearest free AGV by Dijkstra `shortestPath` cost**, routes it node→node, marks the mission FINISHED on arrival, then routes the AGV **home** to its parking node.
+- **Traffic control** (`resolveTraffic`): a moving AGV reserves a look-ahead zone (`TRAFFIC_RADIUS`); if a higher-priority AGV occupies it the lower one yields (status `TRAFFIC`). Priority: heading-to-target > returning-home.
+- Raises alarms: low-battery WARNING + random transient FATAL faults (auto-recover). Emits VDA5050 state every tick + throttled stream log.
 
-### Types are the contract
+### Map & coordinates
+[src/services/map.service.ts](src/services/map.service.ts) — plain functions: `loadMap(url)` / `loadMapFromJson(string)` both call `parseMap(raw)` to normalize `advancedPointList`/`advancedCurveList`/`advancedAreaList` into a `FleetMap`; plus `buildNodeMap()`, `getMapBounds()`. The bundled map is ~**61×160 m** (`public/maps/origin_20260120205139.json`).
+Coordinates: map = metres +X East/+Y North; canvas = pixels +Y down → **flip Y** (`worldToScreen`/`screenToWorld` in [src/utils/canvas.ts](src/utils/canvas.ts)). Heading `screenRot = π/2 - theta` (theta in **degrees** in code). **AGVs are drawn true-to-scale in metres** (`robotSize` = footprint metres × zoom, px floor) so they match the map; the toolbar "Robot m" slider sets that.
 
-[src/types/index.ts](src/types/index.ts) holds three groups: **VDA5050** wire shapes (`VDA5050State`, `AgvPose`, `AgvBattery`, `VDA5050Error`…), **ATP map** shapes (`FleetMap`, `MapPoint` with `cls: LocationMark|ActionPoint|Charge`, `MapCurve`, `MapArea`), and the **UI** model **`Robot`** (the per-robot aggregate the store holds — the UI model is `Robot`, not `Vehicle`). Also `FleetOrder`, `FleetMetrics`, `MapViewConfig`, `MqttLogEntry`.
+### Types
+[src/types/index.ts](src/types/index.ts) — VDA5050 wire shapes, ATP map shapes (`MapCurve` has `sNode`/`eNode`), and the UI model **`Robot`** (not `Vehicle`). [src/types/fleet.ts](src/types/fleet.ts) — domain types adapted from the legacy system: `Mission`, `Alarm`, `AgvTypeSpec`, `AmrConfig`, `MapConfig`, `BrokerConfig`, RBAC. **Import `Mission`/`Alarm`/config types from `@/types/fleet`, NOT `@/types`** (the barrel does not re-export them, to avoid a cycle).
 
-### Map loading & coordinates
+## Fleet & specs
+- [src/constants/fleet-roster.ts](src/constants/fleet-roster.ts) — our own ATP demo fleet (`ATP-01..06`, mixed models). The simulator uses the first 2.
+- [src/constants/agv-specs.ts](src/constants/agv-specs.ts) — per-model physical specs (`AGV_SPECS`, `speedMaxOf()`); the sim drives each model at its real top speed.
+- [db/schema.sql](db/schema.sql) — clean `atp_rms` MySQL schema (agv_type/map/mission/alarm/…), structure adapted from the legacy system, kept for when a real backend is added.
 
-[src/services/map.service.ts](src/services/map.service.ts) is **plain exported functions** (not a class/singleton): `loadMap(url)` fetches ATP map JSON from `public/maps/*.json` and normalizes `advancedPointList`/`advancedCurveList`/`advancedAreaList` into a `FleetMap`; plus `buildNodeMap()` and `getMapBounds()`.
-
-Coordinate transform — map space is meters, +X East / +Y North; canvas is pixels, +Y down, so **flip Y** (`sy = offsetY - y*scale`). Robot heading: `screenRot = π/2 - theta`, implemented as `MAP_COORD.thetaToScreenRot` in `constants/index.ts`, which treats `theta` as **degrees**. Caveat: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) prose describes `theta` as radians while the code (and the `AgvPose` comment) use degrees — verify against real robot data; theta-format mismatch is flagged as a known risk in [docs/DEVELOPMENT_PLAN.md](docs/DEVELOPMENT_PLAN.md).
-
-## State of the codebase
-
-Early scaffold (~Week 1 of the 4-week plan in [docs/DEVELOPMENT_PLAN.md](docs/DEVELOPMENT_PLAN.md)). The store, services, types, and all the layout components exist and render, but the live wiring is incomplete: `App.tsx` loads the map and renders panels, yet **MQTT is not connected on startup** and the store is not yet fed from `mqttService` (the robot list will be empty until that loop is wired). When implementing data flow, connect `mqttService.onStateUpdate` → `useFleetStore.updateFromVDA5050` and seed robots via `upsertRobot`.
+## Legacy system (reference only)
+Adapted *structure* (not data) from the old Aiten RDS at `C:\Aipa\System` (Spring Boot + MySQL `aipa_rds` + openTCS; real UI on :12200, sim on :12201). Its rows are other customers' leftover data — **build our own maps/fleet, don't import theirs.** The expanded status bar + cursor readout were modelled on that UI. See the `legacy-aiten-rds-system` memory for DB access details.
 
 ## Conventions
-
-- Import services via their singleton (`mqttService`); import map helpers as named functions.
-- Colors/labels: `STATUS_COLOR`, `STATUS_LABEL`, asset-path helpers `AGV_ASSET_PATH(model, status)` / `AGV_POSTER_PATH(model)`, and `DEFAULT_MAP_CONFIG` all live in [src/constants/index.ts](src/constants/index.ts).
-- AGV SVG assets: `public/assets/agv/<MODEL>/<MODEL>_<STATUS>.svg` (statuses IDLE/EXECUTING/CHARGING/ERROR/PAUSE/TRAFFIC); models enumerated in `AGV_MODELS` / the `AgvModel` type. Map element icons under `public/assets/icons/`.
-- `npm run lint` reports unused eslint-disable directives — run it before considering work done.
+- Import services via their singletons (`mqttService`, `simulationService`); map helpers are named functions.
+- Status colours/labels + asset paths (`AGV_ASSET_PATH(model,status)`) + `DEFAULT_MAP_CONFIG` live in [src/constants/index.ts](src/constants/index.ts). SVG assets: `public/assets/agv/<MODEL>/<MODEL>_<STATUS>.svg`.
+- Run `npm run build` before considering work done (it type-checks). Work is committed in small `feat:`/`fix:` commits; nothing has been pushed to a remote in this session.
