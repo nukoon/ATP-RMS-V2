@@ -14,16 +14,19 @@ import { OrderPanel }   from '@/components/panels/OrderPanel'
 import { AlarmPanel }   from '@/components/panels/AlarmPanel'
 import { MapToolbar }   from '@/components/map/MapToolbar'
 import { MapCanvas }    from '@/components/map/MapCanvas'
+import { StatusBar }    from '@/components/StatusBar'
 import { useMapTransform } from '@/hooks/useMapTransform'
 
 type RightTab = 'stream' | 'missions' | 'alarms'
 
 export default function App() {
-  const { map, setMap, robots, mqttLog, metrics, mapConfig, setMapConfig, selectedRobotId, setSelectedRobotId, mqttConnected, mqttLatency } = useFleetStore()
+  const { map, setMap, robots, mqttLog, metrics, mapConfig, setMapConfig, selectedRobotId, setSelectedRobotId, mqttConnected } = useFleetStore()
   const ctrl = useMapTransform(map)
   const [simOn, setSimOn] = useState(false)
   const [tab, setTab] = useState<RightTab>('stream')
+  const [cursor, setCursor] = useState<{ x: number; y: number } | null>(null)
   const alarms = useFleetStore(s => s.alarms)
+  const missions = useFleetStore(s => s.missions)
   const activeAlarms = alarms.filter(a => a.status === 'ACTIVE').length
 
   useEffect(() => {
@@ -95,6 +98,7 @@ export default function App() {
               config={mapConfig}
               selectedRobotId={selectedRobotId}
               onRobotClick={setSelectedRobotId}
+              onHover={setCursor}
               ctrl={ctrl}
             />
           ) : (
@@ -147,15 +151,16 @@ export default function App() {
         </div>
       </div>
 
-      {/* STATUS BAR */}
-      <div style={{ background: '#0a1520', borderTop: '1px solid #152030', padding: '3px 12px', display: 'flex', gap: 14, fontFamily: 'Share Tech Mono', fontSize: 9, color: '#5a7080', alignItems: 'center', flexShrink: 0 }}>
-        <span>MAP: <span style={{ color: '#00d4ff' }}>origin_20260120205139.json</span></span>
-        <span>LM:<span style={{ color: '#00d4ff' }}>{map?.points.filter(p=>p.cls==='LocationMark').length ?? 0}</span> AP:<span style={{ color: '#00d4ff' }}>{map?.points.filter(p=>p.cls==='ActionPoint').length ?? 0}</span></span>
-        <span>MQTT: <span style={{ color: mqttConnected ? '#00ff88' : '#ff4444' }}>{mqttConnected ? 'CONNECTED' : 'OFFLINE'}</span></span>
-        <span>Latency: <span style={{ color: '#00d4ff' }}>{mqttConnected ? `${mqttLatency}ms` : '—'}</span></span>
-        <span>Fleet: <span style={{ color: '#00d4ff' }}>{robots.size}</span></span>
-        <span style={{ marginLeft: 'auto' }}>ATP-RMS-V2 v0.1.0</span>
-      </div>
+      {/* STATUS BAR — fleet state counts + cursor readout (legacy :12200 style) */}
+      <StatusBar
+        robots={robotList}
+        missions={missions}
+        map={map}
+        mqttConnected={mqttConnected}
+        cursor={cursor}
+        zoom={ctrl.transform.scale}
+        heading={selectedRobot?.pose.theta ?? 0}
+      />
     </div>
   )
 }

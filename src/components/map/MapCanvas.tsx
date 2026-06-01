@@ -5,7 +5,7 @@
 import { useEffect, useRef, useCallback } from 'react'
 import type { FleetMap, Robot, MapViewConfig } from '@/types'
 import type { Transform } from '@/utils/canvas'
-import { worldToScreen, thetaToScreenRot } from '@/utils/canvas'
+import { worldToScreen, screenToWorld, thetaToScreenRot } from '@/utils/canvas'
 import { STATUS_COLOR, AGV_ASSET_PATH } from '@/constants'
 import type { useMapTransform } from '@/hooks/useMapTransform'
 
@@ -15,6 +15,7 @@ interface Props {
   config:    MapViewConfig
   selectedRobotId: string | null
   onRobotClick:  (id: string | null) => void
+  onHover?: (world: { x: number; y: number } | null) => void
   ctrl: ReturnType<typeof useMapTransform>
 }
 
@@ -29,7 +30,7 @@ function getCachedImg(src: string): HTMLImageElement {
   return imgCache.get(src)!
 }
 
-export function MapCanvas({ map, robots, config, selectedRobotId, onRobotClick, ctrl }: Props) {
+export function MapCanvas({ map, robots, config, selectedRobotId, onRobotClick, onHover, ctrl }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const animRef   = useRef<number>()
   const t = ctrl.transform
@@ -109,9 +110,11 @@ export function MapCanvas({ map, robots, config, selectedRobotId, onRobotClick, 
     if (e.buttons === 1) movedRef.current = true
     const { x, y } = pos(e)
     ctrl.handleMouseMove(x, y)
-  }, [ctrl])
+    onHover?.(screenToWorld(x, y, tRef.current))
+  }, [ctrl, onHover])
 
   const onMouseUp = useCallback(() => ctrl.handleMouseUp(), [ctrl])
+  const onLeave = useCallback(() => { ctrl.handleMouseUp(); onHover?.(null) }, [ctrl, onHover])
 
   // Click → robot selection (suppressed if the click was a drag)
   const handleClick = useCallback((e: React.MouseEvent) => {
@@ -136,7 +139,7 @@ export function MapCanvas({ map, robots, config, selectedRobotId, onRobotClick, 
       onMouseDown={onMouseDown}
       onMouseMove={onMouseMove}
       onMouseUp={onMouseUp}
-      onMouseLeave={onMouseUp}
+      onMouseLeave={onLeave}
     />
   )
 }
