@@ -49,13 +49,15 @@ export function parseMap(raw: RawMap): FleetMap {
   }))
 
   const curves: MapCurve[] = (raw.advancedCurveList ?? []).map(c => ({
-    id:   c.instanceName,
-    type: c.routeType,
-    sx:   c.startPos.pos.x,
-    sy:   c.startPos.pos.y,
-    ex:   c.endPos.pos.x,
-    ey:   c.endPos.pos.y,
-    cp:   c.trajectory?.controlPoints ?? [],
+    id:    c.instanceName,
+    type:  c.routeType,
+    sNode: c.startPos.instanceName,
+    eNode: c.endPos.instanceName,
+    sx:    c.startPos.pos.x,
+    sy:    c.startPos.pos.y,
+    ex:    c.endPos.pos.x,
+    ey:    c.endPos.pos.y,
+    cp:    c.trajectory?.controlPoints ?? [],
   }))
 
   const areas: MapArea[] = (raw.advancedAreaList ?? []).map(a => ({

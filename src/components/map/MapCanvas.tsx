@@ -262,7 +262,11 @@ function drawRobotPath(ctx: CanvasRenderingContext2D, map: FleetMap, r: Robot, t
 
 function drawRobot(ctx: CanvasRenderingContext2D, r: Robot, t: Transform, cfg: MapViewConfig, selId: string | null) {
   const { sx, sy } = worldToScreen(r.pose.x, r.pose.y, t)
-  const sz = cfg.robotSize; const half = sz / 2
+  // Size the robot in METRES so it stays true-to-scale with the map.
+  // cfg.robotSize is the real footprint length in metres (slider 1–4 m),
+  // converted to pixels via the current zoom, with a small floor so it
+  // never disappears when zoomed far out.
+  const sz = Math.max(10, cfg.robotSize * t.scale); const half = sz / 2
   if (sx < -sz * 2 || sx > ctx.canvas.width + sz * 2) return
   const col = STATUS_COLOR[r.status]
   // Glow

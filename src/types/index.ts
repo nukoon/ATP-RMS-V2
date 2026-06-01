@@ -22,6 +22,7 @@ export interface MapPoint {
 export interface MapCurve {
   id: string
   type: 'line' | 'bezier'
+  sNode: string; eNode: string   // start/end node ids (directed: traverse sNode→eNode)
   sx: number; sy: number
   ex: number; ey: number
   cp: { x: number; y: number }[]

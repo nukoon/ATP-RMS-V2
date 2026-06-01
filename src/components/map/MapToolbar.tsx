@@ -32,7 +32,7 @@ const ChkRow = ({ label, checked, onChange }: { label: string; checked: boolean;
 export function MapToolbar({ config: cfg, zoom, onChange, onZoomIn, onZoomOut, onFit }: Props) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', background: '#0c1a28', borderBottom: '1px solid #152030', flexShrink: 0, overflowX: 'auto' }}>
-      <SliderRow label="Robot px"   value={cfg.robotSize}          min={16} max={80} step={2}   onChange={v => onChange({ robotSize: v })} />
+      <SliderRow label="Robot m"    value={cfg.robotSize}          min={1}  max={6}  step={0.5} onChange={v => onChange({ robotSize: v })} suffix="m" />
       <SliderRow label="Node px"    value={cfg.nodeSize}           min={1}  max={10} step={0.5} onChange={v => onChange({ nodeSize: v })} />
       <SliderRow label="Label px"   value={cfg.labelSize}          min={6}  max={18} step={1}   onChange={v => onChange({ labelSize: v })} />
       <SliderRow label="Label@zoom" value={cfg.labelZoomThreshold} min={0.5} max={8} step={0.5} onChange={v => onChange({ labelZoomThreshold: v })} suffix="×" />

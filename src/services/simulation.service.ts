@@ -1,9 +1,13 @@
 /**
- * SimulationService — dev-mode fleet driver (no MQTT broker required)
- * Walks robots along the map's real route edges (curves), following
- * bezier/line geometry, and feeds synthetic VDA5050 state through the
- * real store pipeline. Also acts as a lightweight dispatcher: it picks
- * up PENDING missions, drives bots toward the target, and raises alarms.
+ * SimulationService — dev-mode fleet driver (no MQTT broker required).
+ *
+ * Models a small real fleet: 2 AGVs that PARK at the map's charge nodes.
+ * While idle they wait at their parking spot. When a mission is created we
+ * dispatch the NEAREST free AGV (by shortest-path distance), route it node→
+ * node over the DIRECTED edge graph (one-way edges are respected because we
+ * only ever traverse an edge start→end), run the job, then send it home.
+ *
+ * Feeds synthetic VDA5050 state through the real store pipeline.
  */
 import type { FleetMap, MapPoint, MapCurve, AgvModel, AgvStatus, VDA5050State, VDA5050Error } from '@/types'
 import { useFleetStore } from '@/store/fleet.store'
@@ -11,155 +15,146 @@ import { calcTheta } from '@/utils/canvas'
 import { speedMaxOf } from '@/constants/agv-specs'
 import { FLEET_ROSTER } from '@/constants/fleet-roster'
 
-interface BotMission {
-  id: string
-  tx: number; ty: number      // target node coords
-  initialDist: number
-  ticks: number
-}
+type Phase = 'PARKED' | 'TO_TARGET' | 'TO_HOME'
 
 interface SimBot {
   id: string
   model: AgvModel
-  curve: MapCurve
-  t: number            // 0..1 progress along current edge
-  speed: number        // progress per tick (scaled by edge length)
-  mps: number          // this model's real top speed (m/s)
+  mps: number              // top speed m/s
+  homeNode: string         // parking (charge) node id
+  node: string             // node the bot currently sits on / departed from
+  route: MapCurve[]        // remaining edges to traverse
+  edge: MapCurve | null    // current edge
+  t: number                // 0..1 along current edge
+  phase: Phase
+  missionId: string | null
   battery: number
   status: AgvStatus
-  paused: boolean      // operator paused via quick action
-  mission: BotMission | null
+  paused: boolean
   fault: { until: number; error: VDA5050Error } | null
-  lowBatt: boolean     // whether a LOW_BATTERY alarm is currently raised
-  yielding: boolean    // currently yielding to traffic this tick
-  lastLog: number      // ms timestamp of last VDA stream entry
+  lowBatt: boolean
+  yielding: boolean
+  pos: { x: number; y: number }
+  theta: number
+  lastLog: number
 }
 
-const FLEET: { id: string; model: AgvModel }[] =
-  FLEET_ROSTER.map(m => ({ id: m.id, model: m.model }))
-
 const TICK_MS = 100
-const ARRIVE_DIST = 1.0           // map units: close enough to the target node
-const MISSION_TIMEOUT_TICKS = 2000
-const LOW_BATTERY = 20            // % — raise a warning below this
-const FAULT_CHANCE = 0.0006       // per bot per tick — random transient fault
-const TRAFFIC_RADIUS = 2.2        // map units: separation zone between AGVs
-const LOOKAHEAD = 0.06            // fraction of edge to look ahead for conflicts
-const KEY = (x: number, y: number) => `${x.toFixed(2)},${y.toFixed(2)}`
-const rand = <T,>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)]
+const LOW_BATTERY = 20
+const FAULT_CHANCE = 0.0004
+const TRAFFIC_RADIUS = 3.0         // m: separation zone
 const uid = () => Math.random().toString(36).slice(2, 9)
 
-/** Point on an edge at parameter t (0..1), respecting line / quad / cubic bezier */
+// ── geometry ───────────────────────────────────────────────
 function pointOnCurve(c: MapCurve, t: number): { x: number; y: number } {
   if (c.type === 'bezier' && c.cp.length >= 2) {
     const u = 1 - t
-    const a = u * u * u, b = 3 * u * u * t, d = 3 * u * t * t, e = t * t * t
-    return {
-      x: a * c.sx + b * c.cp[0].x + d * c.cp[1].x + e * c.ex,
-      y: a * c.sy + b * c.cp[0].y + d * c.cp[1].y + e * c.ey,
-    }
+    const a = u*u*u, b = 3*u*u*t, d = 3*u*t*t, e = t*t*t
+    return { x: a*c.sx + b*c.cp[0].x + d*c.cp[1].x + e*c.ex, y: a*c.sy + b*c.cp[0].y + d*c.cp[1].y + e*c.ey }
   }
   if (c.type === 'bezier' && c.cp.length === 1) {
     const u = 1 - t
-    return {
-      x: u * u * c.sx + 2 * u * t * c.cp[0].x + t * t * c.ex,
-      y: u * u * c.sy + 2 * u * t * c.cp[0].y + t * t * c.ey,
-    }
+    return { x: u*u*c.sx + 2*u*t*c.cp[0].x + t*t*c.ex, y: u*u*c.sy + 2*u*t*c.cp[0].y + t*t*c.ey }
   }
   return { x: c.sx + (c.ex - c.sx) * t, y: c.sy + (c.ey - c.sy) * t }
 }
 
 function curveLength(c: MapCurve): number {
-  let len = 0
-  let prev = pointOnCurve(c, 0)
-  for (let i = 1; i <= 12; i++) {
-    const p = pointOnCurve(c, i / 12)
-    len += Math.hypot(p.x - prev.x, p.y - prev.y)
-    prev = p
-  }
+  let len = 0, prev = pointOnCurve(c, 0)
+  for (let i = 1; i <= 10; i++) { const p = pointOnCurve(c, i / 10); len += Math.hypot(p.x - prev.x, p.y - prev.y); prev = p }
   return len || 0.5
 }
 
 export class SimulationService {
   private bots: SimBot[] = []
   private timer: ReturnType<typeof setInterval> | null = null
-  /** adjacency: node coord key → edges leaving that node */
-  private graph = new Map<string, MapCurve[]>()
-  private nodes: MapPoint[] = []
+  private nodes = new Map<string, MapPoint>()
+  /** directed adjacency: nodeId → outgoing edges */
+  private adj = new Map<string, MapCurve[]>()
+  private edgeLen = new Map<string, number>()
 
   get running() { return this.timer !== null }
 
+  // ── graph ────────────────────────────────────────────────
   private buildGraph(map: FleetMap) {
-    this.graph.clear()
+    this.nodes = new Map(map.points.map(p => [p.id, p]))
+    this.adj.clear(); this.edgeLen.clear()
     for (const c of map.curves) {
-      const k = KEY(c.sx, c.sy)
-      const list = this.graph.get(k) ?? []
-      list.push(c)
-      this.graph.set(k, list)
+      const list = this.adj.get(c.sNode) ?? []
+      list.push(c); this.adj.set(c.sNode, list)
+      this.edgeLen.set(c.id, curveLength(c))
     }
   }
 
-  /** Pick the next edge: greedy toward a target if the bot is on a mission, else random. */
-  private nextCurve(b: SimBot, all: MapCurve[]): MapCurve {
-    const out = this.graph.get(KEY(b.curve.ex, b.curve.ey))
-    if (!out || !out.length) return rand(all)
-    if (!b.mission) return rand(out)
-    // choose the outgoing edge whose endpoint is closest to the target
-    const { tx, ty } = b.mission
-    return out.reduce((best, c) =>
-      Math.hypot(c.ex - tx, c.ey - ty) < Math.hypot(best.ex - tx, best.ey - ty) ? c : best
-    )
+  /** Dijkstra over directed edges: returns the edge sequence start→goal, or null. */
+  private shortestPath(start: string, goal: string): MapCurve[] | null {
+    if (start === goal) return []
+    const dist = new Map<string, number>([[start, 0]])
+    const prev = new Map<string, MapCurve>()
+    const seen = new Set<string>()
+    const pq: { n: string; d: number }[] = [{ n: start, d: 0 }]
+    while (pq.length) {
+      pq.sort((a, b) => a.d - b.d)
+      const { n } = pq.shift()!
+      if (n === goal) break
+      if (seen.has(n)) continue
+      seen.add(n)
+      for (const e of this.adj.get(n) ?? []) {
+        const nd = (dist.get(n) ?? Infinity) + (this.edgeLen.get(e.id) ?? 1)
+        if (nd < (dist.get(e.eNode) ?? Infinity)) {
+          dist.set(e.eNode, nd); prev.set(e.eNode, e); pq.push({ n: e.eNode, d: nd })
+        }
+      }
+    }
+    if (!prev.has(goal)) return null
+    const path: MapCurve[] = []
+    let cur = goal
+    while (cur !== start) { const e = prev.get(cur)!; path.unshift(e); cur = e.sNode }
+    return path
   }
 
-  /** Nearest map node to a world point — used to resolve mission start/end. */
-  nodeById(id: string): MapPoint | undefined {
-    return this.nodes.find(n => n.id === id)
+  private pathCost(path: MapCurve[]): number {
+    return path.reduce((s, e) => s + (this.edgeLen.get(e.id) ?? 1), 0)
   }
 
+  nodeById(id: string): MapPoint | undefined { return this.nodes.get(id) }
+
+  // ── lifecycle ────────────────────────────────────────────
   start(map: FleetMap) {
     if (this.timer) return
-    if (map.curves.length < 1) {
-      console.warn('[SIM] map has no edges to drive on')
-      return
-    }
+    if (!map.curves.length) { console.warn('[SIM] map has no edges'); return }
     this.buildGraph(map)
-    this.nodes = map.points
-    const all = map.curves
+
+    // parking = charge nodes (fallback to first nodes). Use 2 robots.
+    const charge = map.points.filter(p => p.cls === 'Charge')
+    const parks = (charge.length >= 2 ? charge : map.points).slice(0, 2)
+    const roster = FLEET_ROSTER.slice(0, 2)
 
     const store = useFleetStore.getState()
-    this.bots = FLEET.map(f => {
-      const curve = rand(all)
-      const start = pointOnCurve(curve, 0)
-      const mps = speedMaxOf(f.model)
+    this.bots = roster.map((f, i) => {
+      const home = parks[i] ?? parks[0]
       const bot: SimBot = {
-        id: f.id, model: f.model, curve, t: 0,
-        mps,
-        speed: (mps * (TICK_MS / 1000)) / curveLength(curve),
-        battery: 60 + Math.random() * 40,
-        status: 'EXECUTING',
-        paused: false,
-        mission: null,
-        fault: null,
-        lowBatt: false,
-        yielding: false,
-        lastLog: 0,
+        id: f.id, model: f.model, mps: speedMaxOf(f.model),
+        homeNode: home.id, node: home.id,
+        route: [], edge: null, t: 0, phase: 'PARKED', missionId: null,
+        battery: 70 + Math.random() * 30, status: 'IDLE',
+        paused: false, fault: null, lowBatt: false, yielding: false,
+        pos: { x: home.x, y: home.y }, theta: home.theta ?? 0, lastLog: 0,
       }
       store.upsertRobot({
         id: f.id, model: f.model, status: 'IDLE',
-        pose: { x: start.x, y: start.y, theta: 0, mapId: 'sim' },
+        pose: { x: home.x, y: home.y, theta: bot.theta, mapId: 'sim' },
         battery: { batteryCharge: bot.battery, charging: false },
         velocity: { vx: 0, vy: 0, omega: 0 },
-        currentNodeId: '', currentOrderId: null,
-        path: [], pathIndex: 0, errors: [],
-        totalDistance: 0, lastUpdated: Date.now(),
-        mqttConnected: true,
+        currentNodeId: home.id, currentOrderId: null, path: [], pathIndex: 0,
+        errors: [], totalDistance: 0, lastUpdated: Date.now(), mqttConnected: true,
       })
       return bot
     })
 
     store.setMqttConnected(true)
-    this.timer = setInterval(() => this.tick(all), TICK_MS)
-    console.log('[SIM] started with', this.bots.length, 'robots on', all.length, 'edges')
+    this.timer = setInterval(() => this.tick(), TICK_MS)
+    console.log('[SIM] started', this.bots.length, 'AGVs parked at', parks.map(p => p.id).join(', '))
   }
 
   stop() {
@@ -168,147 +163,143 @@ export class SimulationService {
     useFleetStore.getState().setMqttConnected(false)
   }
 
-  /** Operator quick action from the Robot Detail panel. */
   command(robotId: string, action: 'PAUSE' | 'RESUME' | 'CANCEL') {
     const b = this.bots.find(x => x.id === robotId)
     if (!b) return
     if (action === 'PAUSE')  { b.paused = true;  b.status = 'PAUSE' }
-    if (action === 'RESUME') { b.paused = false; b.status = 'EXECUTING' }
+    if (action === 'RESUME') { b.paused = false; b.status = b.edge ? 'EXECUTING' : 'IDLE' }
     if (action === 'CANCEL') {
       b.paused = false
-      if (b.mission) { useFleetStore.getState().cancelMission(b.mission.id); b.mission = null }
-      b.status = 'IDLE'
+      if (b.missionId) { useFleetStore.getState().cancelMission(b.missionId); b.missionId = null }
+      this.sendHome(b)
     }
   }
 
-  /** Assign PENDING missions to free bots (nearest-first). */
+  // ── dispatch: nearest free bot by path distance ──────────
   private dispatch(store: ReturnType<typeof useFleetStore.getState>) {
     const pending = store.missions.filter(m => m.status === 'PENDING')
-    if (!pending.length) return
     for (const m of pending) {
       const target = this.nodeById(m.endNode)
       if (!target) { store.updateMission(m.id, { status: 'FAILED' }); continue }
-      const free = this.bots.filter(b => !b.mission && !b.fault && b.status !== 'CHARGING')
-      if (!free.length) return
-      // pick the bot currently closest to the mission target
-      const pos = (b: SimBot) => pointOnCurve(b.curve, b.t)
-      const bot = free.reduce((best, b) =>
-        Math.hypot(pos(b).x - target.x, pos(b).y - target.y) <
-        Math.hypot(pos(best).x - target.x, pos(best).y - target.y) ? b : best)
-      const p = pos(bot)
-      bot.mission = { id: m.id, tx: target.x, ty: target.y, initialDist: Math.hypot(p.x - target.x, p.y - target.y) || 1, ticks: 0 }
-      bot.status = 'EXECUTING'
-      store.updateMission(m.id, { status: 'EXECUTING', agvId: bot.id, assignedAt: new Date().toISOString(), startedAt: new Date().toISOString() })
+      const free = this.bots.filter(b => b.phase === 'PARKED' && !b.missionId && !b.fault && b.battery > LOW_BATTERY)
+      if (!free.length) return  // all busy → leave PENDING for later
+
+      // choose the bot with the cheapest route to the target
+      let pick: { b: SimBot; path: MapCurve[]; cost: number } | null = null
+      for (const b of free) {
+        const path = this.shortestPath(b.node, m.endNode)
+        if (!path) continue
+        const cost = this.pathCost(path)
+        if (!pick || cost < pick.cost) pick = { b, path, cost }
+      }
+      if (!pick) { continue } // no reachable bot right now
+
+      const { b, path } = pick
+      b.route = path
+      b.edge = path[0] ?? null
+      b.t = 0
+      b.phase = 'TO_TARGET'
+      b.missionId = m.id
+      b.status = 'EXECUTING'
+      store.updateMission(m.id, { status: 'EXECUTING', agvId: b.id, assignedAt: new Date().toISOString(), startedAt: new Date().toISOString() })
     }
   }
 
-  /** Priority used to decide who yields at a conflict (higher = right of way). */
-  private priority(b: SimBot): number {
-    // on-mission bots outrank free-roamers; stable tiebreak by serial
-    const base = b.mission ? 1000 : 0
-    return base - this.bots.indexOf(b)
+  private sendHome(b: SimBot) {
+    const path = this.shortestPath(b.node, b.homeNode)
+    if (path && path.length) { b.route = path; b.edge = path[0]; b.t = 0; b.phase = 'TO_HOME'; b.status = 'EXECUTING' }
+    else { b.route = []; b.edge = null; b.phase = 'PARKED'; b.status = b.battery < LOW_BATTERY ? 'CHARGING' : 'IDLE' }
   }
 
-  /**
-   * Traffic control: a moving bot reserves a look-ahead zone. If another
-   * active bot already sits in that zone and has higher priority, this bot
-   * yields (holds position, status TRAFFIC) for this tick.
-   */
+  // ── traffic: reserve the node a bot is approaching ───────
   private resolveTraffic() {
-    // current positions of bots that physically occupy the floor
-    const occ = this.bots
-      .filter(b => b.status !== 'IDLE' && b.status !== 'UNKNOWN')
-      .map(b => ({ b, p: pointOnCurve(b.curve, b.t) }))
-
     for (const b of this.bots) {
       b.yielding = false
-      if (b.paused || b.fault || b.status === 'PAUSE' || b.status === 'ERROR' || b.status === 'CHARGING') continue
-
-      const ahead = pointOnCurve(b.curve, Math.min(1, b.t + LOOKAHEAD))
-      for (const other of occ) {
-        if (other.b === b) continue
-        const d = Math.hypot(ahead.x - other.p.x, ahead.y - other.p.y)
-        if (d < TRAFFIC_RADIUS && this.priority(other.b) > this.priority(b)) {
-          b.yielding = true
-          break
-        }
+      if (b.phase === 'PARKED' || b.paused || b.fault || !b.edge) continue
+      const ahead = pointOnCurve(b.edge, Math.min(1, b.t + 0.12))
+      for (const o of this.bots) {
+        if (o === b || o.phase === 'PARKED') continue
+        const d = Math.hypot(ahead.x - o.pos.x, ahead.y - o.pos.y)
+        if (d < TRAFFIC_RADIUS && this.priority(o) > this.priority(b)) { b.yielding = true; break }
       }
     }
   }
+  private priority(b: SimBot): number {
+    // bots heading to a job outrank bots returning home; tiebreak stable by index
+    const base = b.phase === 'TO_TARGET' ? 1000 : 500
+    return base - this.bots.indexOf(b)
+  }
 
-  private tick(all: MapCurve[]) {
+  // ── main loop ────────────────────────────────────────────
+  private tick() {
     const store = useFleetStore.getState()
     const now = Date.now()
-
     this.dispatch(store)
     this.resolveTraffic()
 
     for (const b of this.bots) {
-      // transient fault recovery
-      if (b.fault && now >= b.fault.until) {
-        this.resolveAlarmFor(store, b.id, b.fault.error.errorType)
-        b.fault = null
-        b.status = b.mission ? 'EXECUTING' : 'EXECUTING'
-      }
-      // random transient fault
-      if (!b.fault && !b.paused && b.status === 'EXECUTING' && Math.random() < FAULT_CHANCE) {
-        this.raiseFault(store, b, now)
-      }
+      // fault lifecycle
+      if (b.fault && now >= b.fault.until) { this.resolveAlarmFor(store, b.id, b.fault.error.errorType); b.fault = null; b.status = b.edge ? 'EXECUTING' : 'IDLE' }
+      if (!b.fault && !b.paused && b.status === 'EXECUTING' && Math.random() < FAULT_CHANCE) this.raiseFault(store, b, now)
 
-      // paused / faulted robots hold position but keep reporting
-      if (b.paused || b.fault || b.status === 'PAUSE' || b.status === 'ERROR') {
+      if (b.paused || b.fault) { this.report(store, b, now); continue }
+
+      // parked & idle: charge slowly, wait for a mission
+      if (b.phase === 'PARKED') {
+        b.status = b.battery < 99 ? 'CHARGING' : 'IDLE'
+        b.battery = Math.min(100, b.battery + 0.15)
         this.report(store, b, now)
         continue
       }
 
-      // traffic: yield right-of-way, hold position this tick
-      if (b.yielding) {
-        if (b.status !== 'CHARGING') b.status = 'TRAFFIC'
-        this.report(store, b, now)
-        continue
-      }
-      // clear a stale TRAFFIC state once the path is free again
-      if (b.status === 'TRAFFIC') b.status = b.battery < 15 ? 'CHARGING' : 'EXECUTING'
+      if (b.yielding) { b.status = 'TRAFFIC'; this.report(store, b, now); continue }
+      if (b.status === 'TRAFFIC') b.status = 'EXECUTING'
 
-      b.t += b.speed
-      if (b.t >= 1) {
-        store.recordOrderCompleted()
-        b.curve = this.nextCurve(b, all)
-        b.speed = (b.mps * (TICK_MS / 1000)) / curveLength(b.curve)
-        b.t = 0
-        b.battery = Math.max(5, b.battery - 0.4)
-        b.status = b.battery < 15 ? 'CHARGING' : 'EXECUTING'
-      }
+      // advance along current edge
+      if (b.edge) {
+        const len = this.edgeLen.get(b.edge.id) ?? 1
+        b.t += (b.mps * (TICK_MS / 1000)) / len
+        const p = pointOnCurve(b.edge, Math.min(1, b.t))
+        const look = pointOnCurve(b.edge, Math.min(1, b.t + 0.05))
+        b.theta = calcTheta(look.x - p.x, look.y - p.y)
+        b.battery = Math.max(2, b.battery - 0.02)
+        b.pos = p
 
-      // mission progress / arrival
-      if (b.mission) {
-        const p = pointOnCurve(b.curve, b.t)
-        const dist = Math.hypot(p.x - b.mission.tx, p.y - b.mission.ty)
-        const progress = Math.max(0, Math.min(99, Math.round((1 - dist / b.mission.initialDist) * 100)))
-        store.updateMission(b.mission.id, { progress })
-        b.mission.ticks++
-        if (dist <= ARRIVE_DIST) {
-          store.updateMission(b.mission.id, { status: 'FINISHED', progress: 100, finishedAt: new Date().toISOString() })
-          b.mission = null
-        } else if (b.mission.ticks > MISSION_TIMEOUT_TICKS) {
-          store.updateMission(b.mission.id, { status: 'FAILED', finishedAt: new Date().toISOString() })
-          b.mission = null
+        if (b.t >= 1) {
+          // arrived at edge end node
+          b.node = b.edge.eNode
+          b.route.shift()
+          b.edge = b.route[0] ?? null
+          b.t = 0
+          if (!b.edge) this.onArrive(store, b)
         }
+      } else {
+        this.onArrive(store, b)
       }
 
-      // battery alarms
+      // low-battery alarm
       if (b.battery < LOW_BATTERY && !b.lowBatt) {
         b.lowBatt = true
-        store.pushAlarm({ id: uid(), agvId: b.id, code: 'BAT_LOW', level: 'WARNING',
-          message: `Battery low (${Math.round(b.battery)}%)`, status: 'ACTIVE', createdAt: new Date().toISOString() })
-      } else if (b.battery >= LOW_BATTERY && b.lowBatt) {
-        b.lowBatt = false
-        this.resolveAlarmFor(store, b.id, 'BAT_LOW')
-      }
+        store.pushAlarm({ id: uid(), agvId: b.id, code: 'BAT_LOW', level: 'WARNING', message: `Battery low (${Math.round(b.battery)}%)`, status: 'ACTIVE', createdAt: new Date().toISOString() })
+      } else if (b.battery >= LOW_BATTERY && b.lowBatt) { b.lowBatt = false; this.resolveAlarmFor(store, b.id, 'BAT_LOW') }
 
       this.report(store, b, now)
     }
     store.setMqttLatency(20 + Math.round(Math.random() * 30))
+  }
+
+  /** Reached the end of a route. */
+  private onArrive(store: ReturnType<typeof useFleetStore.getState>, b: SimBot) {
+    if (b.phase === 'TO_TARGET') {
+      if (b.missionId) { store.updateMission(b.missionId, { status: 'FINISHED', progress: 100, finishedAt: new Date().toISOString() }); store.recordOrderCompleted() }
+      b.missionId = null
+      this.sendHome(b)
+    } else { // TO_HOME or stray
+      b.phase = 'PARKED'
+      b.status = b.battery < 99 ? 'CHARGING' : 'IDLE'
+      const home = this.nodeById(b.homeNode)
+      if (home) { b.pos = { x: home.x, y: home.y }; b.node = home.id }
+    }
   }
 
   private raiseFault(store: ReturnType<typeof useFleetStore.getState>, b: SimBot, now: number) {
@@ -317,14 +308,11 @@ export class SimulationService {
       { type: 'LOCALIZATION_LOST', desc: 'Localization score below threshold' },
       { type: 'MOTOR_OVERCURRENT',  desc: 'Drive motor over-current' },
     ]
-    const f = rand(faults)
-    const error: VDA5050Error = {
-      errorType: f.type, errorLevel: 'FATAL', errorDescription: f.desc, errorReferences: [],
-    }
+    const f = faults[Math.floor(Math.random() * faults.length)]
+    const error: VDA5050Error = { errorType: f.type, errorLevel: 'FATAL', errorDescription: f.desc, errorReferences: [] }
     b.fault = { until: now + 3000 + Math.random() * 4000, error }
     b.status = 'ERROR'
-    store.pushAlarm({ id: uid(), agvId: b.id, code: f.type, level: 'ERROR',
-      message: f.desc, status: 'ACTIVE', createdAt: new Date().toISOString() })
+    store.pushAlarm({ id: uid(), agvId: b.id, code: f.type, level: 'ERROR', message: f.desc, status: 'ACTIVE', createdAt: new Date().toISOString() })
   }
 
   private resolveAlarmFor(store: ReturnType<typeof useFleetStore.getState>, agvId: string, code: string) {
@@ -332,19 +320,22 @@ export class SimulationService {
     if (a) store.resolveAlarm(a.id)
   }
 
-  /** Emit one synthetic VDA5050 state for a bot through the store pipeline. */
   private report(store: ReturnType<typeof useFleetStore.getState>, b: SimBot, now: number) {
-    const pos  = pointOnCurve(b.curve, b.t)
-    const look = pointOnCurve(b.curve, Math.min(1, b.t + 0.05))
-    const theta = calcTheta(look.x - pos.x, look.y - pos.y)
+    // live mission progress = edges done / total (best-effort)
+    if (b.missionId && b.phase === 'TO_TARGET') {
+      const remaining = b.route.length
+      const total = remaining + 1
+      const pct = Math.max(1, Math.min(99, Math.round((1 - remaining / Math.max(total, 1)) * 100)))
+      store.updateMission(b.missionId, { progress: pct })
+    }
 
     const state: VDA5050State = {
       headerId: now, timestamp: new Date().toISOString(), version: '2.0.0',
       manufacturer: 'ATP', serialNumber: b.id,
-      orderId: b.mission ? b.mission.id : '', orderUpdateId: 0,
-      lastNodeId: '', lastNodeSequenceId: 0,
+      orderId: b.missionId ?? '', orderUpdateId: 0,
+      lastNodeId: b.node, lastNodeSequenceId: 0,
       driving: b.status === 'EXECUTING',
-      agvPosition: { x: pos.x, y: pos.y, theta, mapId: 'sim' },
+      agvPosition: { x: b.pos.x, y: b.pos.y, theta: b.theta, mapId: 'sim' },
       velocity: { vx: b.status === 'EXECUTING' ? b.mps : 0, vy: 0, omega: 0 },
       batteryState: { batteryCharge: Math.round(b.battery), charging: b.status === 'CHARGING' },
       operatingMode: b.status,
@@ -354,15 +345,9 @@ export class SimulationService {
     }
     store.updateFromVDA5050(b.id, state)
 
-    // feed the VDA5050 stream panel, throttled to ~1/s per robot
     if (now - b.lastLog > 1000) {
       b.lastLog = now
-      store.pushMqttLog({
-        id: `${b.id}-${now}`,
-        robotId: b.id,
-        topic: 'state',
-        timestamp: new Date().toLocaleTimeString('en-GB'),
-      })
+      store.pushMqttLog({ id: `${b.id}-${now}`, robotId: b.id, topic: 'state', timestamp: new Date().toLocaleTimeString('en-GB') })
     }
   }
 }

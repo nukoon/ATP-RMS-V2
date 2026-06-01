@@ -65,6 +65,6 @@ export const DEFAULT_MAP_CONFIG = {
   nodeSize: 3,
   labelSize: 9,
   labelZoomThreshold: 2.0,
-  robotSize: 32,
+  robotSize: 2.0,            // metres (true-to-scale footprint length)
   selectedModel: 'AM15' as AgvModel,
 }
