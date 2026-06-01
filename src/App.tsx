@@ -4,8 +4,11 @@
  */
 import { useEffect, useState } from 'react'
 import { useFleetStore } from '@/store/fleet.store'
-import { loadMap } from '@/services/map.service'
+import { useConfigStore } from '@/store/config.store'
+import { loadMap, loadMapFromJson } from '@/services/map.service'
 import { simulationService } from '@/services/simulation.service'
+import { mqttService } from '@/services/mqtt.service'
+import { ConfigDialog } from '@/components/ConfigDialog'
 import { RobotList }    from '@/components/sidebar/RobotList'
 import { VdaStream }    from '@/components/panels/VdaStream'
 import { MetricsPanel } from '@/components/panels/MetricsPanel'
@@ -25,13 +28,23 @@ export default function App() {
   const [simOn, setSimOn] = useState(false)
   const [tab, setTab] = useState<RightTab>('stream')
   const [cursor, setCursor] = useState<{ x: number; y: number } | null>(null)
+  const [showConfig, setShowConfig] = useState(false)
+  const [live, setLive] = useState(false)
   const alarms = useFleetStore(s => s.alarms)
   const missions = useFleetStore(s => s.missions)
   const activeAlarms = alarms.filter(a => a.status === 'ACTIVE').length
 
+  const { maps, activeMapId, amrs, broker } = useConfigStore()
+
+  // load the active map (builtin URL or uploaded JSON) whenever it changes
   useEffect(() => {
-    loadMap('/maps/origin_20260120205139.json').then(setMap).catch(console.error)
-  }, [])
+    const mc = maps.find(m => m.id === activeMapId) ?? maps[0]
+    if (!mc) return
+    try {
+      if (mc.source === 'uploaded' && mc.data) setMap(loadMapFromJson(mc.data))
+      else if (mc.url) loadMap(mc.url).then(setMap).catch(console.error)
+    } catch (e) { console.error('[MAP] load failed', e) }
+  }, [activeMapId, maps, setMap])
 
   const toggleSim = () => {
     if (!map) return
@@ -39,7 +52,33 @@ export default function App() {
     else { simulationService.start(map); setSimOn(true) }
   }
 
-  useEffect(() => () => simulationService.stop(), [])
+  // Connect to a real broker and stream the enabled AMRs
+  const toggleLive = () => {
+    if (live) { mqttService.disconnect(); useFleetStore.getState().setMqttConnected(false); setLive(false); return }
+    const enabled = amrs.filter(a => a.enabled)
+    if (!enabled.length) { setShowConfig(true); return }
+    // seed robots so VDA5050 state updates have something to update
+    const store = useFleetStore.getState()
+    for (const a of enabled) {
+      store.upsertRobot({
+        id: a.serial, model: a.model, status: 'UNKNOWN',
+        pose: { x: 0, y: 0, theta: 0, mapId: 'live' },
+        battery: { batteryCharge: 0, charging: false },
+        velocity: { vx: 0, vy: 0, omega: 0 },
+        currentNodeId: '', currentOrderId: null, path: [], pathIndex: 0,
+        errors: [], totalDistance: 0, lastUpdated: Date.now(), mqttConnected: false,
+      })
+    }
+    mqttService.onStateUpdate((id, st) => useFleetStore.getState().updateFromVDA5050(id, st))
+    mqttService.onConnectionChange((c) => useFleetStore.getState().setMqttConnected(c))
+    mqttService.connect(
+      { brokerUrl: broker.wsUrl, username: broker.username, password: broker.password, manufacturer: broker.manufacturer },
+      enabled.map(a => a.serial),
+    )
+    setLive(true)
+  }
+
+  useEffect(() => () => { simulationService.stop(); mqttService.disconnect() }, [])
 
   const robotList = [...robots.values()]
   const selectedRobot = selectedRobotId ? robots.get(selectedRobotId) ?? null : null
@@ -60,9 +99,22 @@ export default function App() {
           ))}
         </div>
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
-          <button onClick={toggleSim}
+          <button onClick={() => setShowConfig(true)}
+            style={{ fontFamily: 'Share Tech Mono', fontSize: 9, cursor: 'pointer', color: '#5a7080',
+              border: '1px solid #152030', background: 'transparent', padding: '2px 7px', borderRadius: 2 }}>
+            ⚙ CONFIG
+          </button>
+          <button onClick={toggleLive}
             style={{ fontFamily: 'Share Tech Mono', fontSize: 9, cursor: 'pointer',
-              color: simOn ? '#00ff88' : '#5a7080',
+              color: live ? '#00d4ff' : '#5a7080',
+              border: `1px solid ${live ? 'rgba(0,212,255,0.5)' : '#152030'}`,
+              background: live ? 'rgba(0,212,255,0.1)' : 'transparent',
+              padding: '2px 7px', borderRadius: 2 }}>
+            {live ? '● LIVE' : '○ CONNECT'}
+          </button>
+          <button onClick={toggleSim} disabled={live}
+            style={{ fontFamily: 'Share Tech Mono', fontSize: 9, cursor: live ? 'not-allowed' : 'pointer',
+              color: simOn ? '#00ff88' : '#5a7080', opacity: live ? 0.4 : 1,
               border: `1px solid ${simOn ? 'rgba(0,255,136,0.4)' : '#152030'}`,
               background: simOn ? 'rgba(0,255,136,0.08)' : 'transparent',
               padding: '2px 7px', borderRadius: 2 }}>
@@ -161,6 +213,8 @@ export default function App() {
         zoom={ctrl.transform.scale}
         heading={selectedRobot?.pose.theta ?? 0}
       />
+
+      {showConfig && <ConfigDialog onClose={() => setShowConfig(false)} />}
     </div>
   )
 }

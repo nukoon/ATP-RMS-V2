@@ -37,12 +37,9 @@ function parseClass(cls: string): NodeClass {
   return 'LocationMark'
 }
 
-export async function loadMap(url: string): Promise<FleetMap> {
-  const res  = await fetch(url)
-  if (!res.ok) throw new Error(`Failed to load map: ${res.status}`)
-  const raw: RawMap = await res.json()
-
-  const points: MapPoint[] = raw.advancedPointList.map(p => ({
+/** Normalize a raw ATP map object into our FleetMap shape. */
+export function parseMap(raw: RawMap): FleetMap {
+  const points: MapPoint[] = (raw.advancedPointList ?? []).map(p => ({
     id:    p.instanceName,
     name:  p.stationName,
     cls:   parseClass(p.className),
@@ -51,7 +48,7 @@ export async function loadMap(url: string): Promise<FleetMap> {
     theta: p.pos.theta,
   }))
 
-  const curves: MapCurve[] = raw.advancedCurveList.map(c => ({
+  const curves: MapCurve[] = (raw.advancedCurveList ?? []).map(c => ({
     id:   c.instanceName,
     type: c.routeType,
     sx:   c.startPos.pos.x,
@@ -61,13 +58,24 @@ export async function loadMap(url: string): Promise<FleetMap> {
     cp:   c.trajectory?.controlPoints ?? [],
   }))
 
-  const areas: MapArea[] = raw.advancedAreaList.map(a => ({
+  const areas: MapArea[] = (raw.advancedAreaList ?? []).map(a => ({
     id:   a.instanceName,
     type: a.zoneType,
     poly: a.zonePolygon ?? [],
   }))
 
   return { points, curves, areas }
+}
+
+export async function loadMap(url: string): Promise<FleetMap> {
+  const res  = await fetch(url)
+  if (!res.ok) throw new Error(`Failed to load map: ${res.status}`)
+  return parseMap(await res.json())
+}
+
+/** Parse an uploaded ATP map from a raw JSON string. */
+export function loadMapFromJson(json: string): FleetMap {
+  return parseMap(JSON.parse(json) as RawMap)
 }
 
 export function buildNodeMap(map: FleetMap): Map<string, MapPoint> {

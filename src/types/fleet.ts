@@ -70,6 +70,36 @@ export interface RobotStatusRecord {
   recordedAt: string
 }
 
+// ── Fleet configuration (user-added, persisted) ────────────
+// An AMR the operator registered to connect to a REAL robot over MQTT.
+export interface AmrConfig {
+  serial: string          // VDA5050 serialNumber — also the topic segment
+  name: string            // display name
+  model: AgvModel
+  color: string
+  ip: string              // robot IP (reference / per-robot broker host)
+  enabled: boolean        // include when connecting
+}
+
+// A user-added map (ATP JSON), stored locally and switchable.
+export interface MapConfig {
+  id: string
+  name: string
+  source: 'builtin' | 'uploaded'
+  url?: string            // for builtin/public maps
+  data?: string           // raw ATP JSON for uploaded maps
+}
+
+// MQTT broker the browser connects to (WebSocket only — see note in
+// mqtt.service). For real robots that speak TCP 1883, point this at a
+// Mosquitto bridge exposing a WebSocket listener.
+export interface BrokerConfig {
+  wsUrl: string           // e.g. ws://localhost:9001
+  username?: string
+  password?: string
+  manufacturer: string    // VDA5050 manufacturer segment, e.g. ATP
+}
+
 // RBAC
 export type UserRole = 'ADMIN' | 'OPERATOR' | 'VIEWER'
 
