@@ -2,13 +2,21 @@
  * SimulationService — dev-mode fleet driver (no MQTT broker required)
  * Walks robots along the map's real route edges (curves), following
  * bezier/line geometry, and feeds synthetic VDA5050 state through the
- * real store pipeline.
+ * real store pipeline. Also acts as a lightweight dispatcher: it picks
+ * up PENDING missions, drives bots toward the target, and raises alarms.
  */
-import type { FleetMap, MapCurve, AgvModel, AgvStatus, VDA5050State } from '@/types'
+import type { FleetMap, MapPoint, MapCurve, AgvModel, AgvStatus, VDA5050State, VDA5050Error } from '@/types'
 import { useFleetStore } from '@/store/fleet.store'
 import { calcTheta } from '@/utils/canvas'
 import { speedMaxOf } from '@/constants/agv-specs'
 import { FLEET_ROSTER } from '@/constants/fleet-roster'
+
+interface BotMission {
+  id: string
+  tx: number; ty: number      // target node coords
+  initialDist: number
+  ticks: number
+}
 
 interface SimBot {
   id: string
@@ -20,16 +28,23 @@ interface SimBot {
   battery: number
   status: AgvStatus
   paused: boolean      // operator paused via quick action
+  mission: BotMission | null
+  fault: { until: number; error: VDA5050Error } | null
+  lowBatt: boolean     // whether a LOW_BATTERY alarm is currently raised
   lastLog: number      // ms timestamp of last VDA stream entry
 }
 
-// The real production fleet (aipa_rds.agv_info): 3 APe15 AGVs.
 const FLEET: { id: string; model: AgvModel }[] =
   FLEET_ROSTER.map(m => ({ id: m.id, model: m.model }))
 
 const TICK_MS = 100
+const ARRIVE_DIST = 1.0           // map units: close enough to the target node
+const MISSION_TIMEOUT_TICKS = 2000
+const LOW_BATTERY = 20            // % — raise a warning below this
+const FAULT_CHANCE = 0.0006       // per bot per tick — random transient fault
 const KEY = (x: number, y: number) => `${x.toFixed(2)},${y.toFixed(2)}`
 const rand = <T,>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)]
+const uid = () => Math.random().toString(36).slice(2, 9)
 
 /** Point on an edge at parameter t (0..1), respecting line / quad / cubic bezier */
 function pointOnCurve(c: MapCurve, t: number): { x: number; y: number } {
@@ -67,6 +82,7 @@ export class SimulationService {
   private timer: ReturnType<typeof setInterval> | null = null
   /** adjacency: node coord key → edges leaving that node */
   private graph = new Map<string, MapCurve[]>()
+  private nodes: MapPoint[] = []
 
   get running() { return this.timer !== null }
 
@@ -80,11 +96,21 @@ export class SimulationService {
     }
   }
 
-  /** Pick an edge leaving the end of the current one (fall back to any edge) */
-  private nextCurve(c: MapCurve, all: MapCurve[]): MapCurve {
-    const out = this.graph.get(KEY(c.ex, c.ey))
-    if (out && out.length) return rand(out)
-    return rand(all)
+  /** Pick the next edge: greedy toward a target if the bot is on a mission, else random. */
+  private nextCurve(b: SimBot, all: MapCurve[]): MapCurve {
+    const out = this.graph.get(KEY(b.curve.ex, b.curve.ey))
+    if (!out || !out.length) return rand(all)
+    if (!b.mission) return rand(out)
+    // choose the outgoing edge whose endpoint is closest to the target
+    const { tx, ty } = b.mission
+    return out.reduce((best, c) =>
+      Math.hypot(c.ex - tx, c.ey - ty) < Math.hypot(best.ex - tx, best.ey - ty) ? c : best
+    )
+  }
+
+  /** Nearest map node to a world point — used to resolve mission start/end. */
+  nodeById(id: string): MapPoint | undefined {
+    return this.nodes.find(n => n.id === id)
   }
 
   start(map: FleetMap) {
@@ -94,6 +120,7 @@ export class SimulationService {
       return
     }
     this.buildGraph(map)
+    this.nodes = map.points
     const all = map.curves
 
     const store = useFleetStore.getState()
@@ -108,6 +135,9 @@ export class SimulationService {
         battery: 60 + Math.random() * 40,
         status: 'EXECUTING',
         paused: false,
+        mission: null,
+        fault: null,
+        lowBatt: false,
         lastLog: 0,
       }
       store.upsertRobot({
@@ -124,7 +154,7 @@ export class SimulationService {
     })
 
     store.setMqttConnected(true)
-    this.timer = setInterval(() => this.tick(map.curves), TICK_MS)
+    this.timer = setInterval(() => this.tick(all), TICK_MS)
     console.log('[SIM] started with', this.bots.length, 'robots on', all.length, 'edges')
   }
 
@@ -140,31 +170,118 @@ export class SimulationService {
     if (!b) return
     if (action === 'PAUSE')  { b.paused = true;  b.status = 'PAUSE' }
     if (action === 'RESUME') { b.paused = false; b.status = 'EXECUTING' }
-    if (action === 'CANCEL') { b.paused = false; b.status = 'IDLE' } // drop order, keep position
+    if (action === 'CANCEL') {
+      b.paused = false
+      if (b.mission) { useFleetStore.getState().cancelMission(b.mission.id); b.mission = null }
+      b.status = 'IDLE'
+    }
+  }
+
+  /** Assign PENDING missions to free bots (nearest-first). */
+  private dispatch(store: ReturnType<typeof useFleetStore.getState>) {
+    const pending = store.missions.filter(m => m.status === 'PENDING')
+    if (!pending.length) return
+    for (const m of pending) {
+      const target = this.nodeById(m.endNode)
+      if (!target) { store.updateMission(m.id, { status: 'FAILED' }); continue }
+      const free = this.bots.filter(b => !b.mission && !b.fault && b.status !== 'CHARGING')
+      if (!free.length) return
+      // pick the bot currently closest to the mission target
+      const pos = (b: SimBot) => pointOnCurve(b.curve, b.t)
+      const bot = free.reduce((best, b) =>
+        Math.hypot(pos(b).x - target.x, pos(b).y - target.y) <
+        Math.hypot(pos(best).x - target.x, pos(best).y - target.y) ? b : best)
+      const p = pos(bot)
+      bot.mission = { id: m.id, tx: target.x, ty: target.y, initialDist: Math.hypot(p.x - target.x, p.y - target.y) || 1, ticks: 0 }
+      bot.status = 'EXECUTING'
+      store.updateMission(m.id, { status: 'EXECUTING', agvId: bot.id, assignedAt: new Date().toISOString(), startedAt: new Date().toISOString() })
+    }
   }
 
   private tick(all: MapCurve[]) {
     const store = useFleetStore.getState()
     const now = Date.now()
+
+    this.dispatch(store)
+
     for (const b of this.bots) {
-      // paused/idle robots hold position but still report state
-      if (b.paused || b.status === 'PAUSE') {
+      // transient fault recovery
+      if (b.fault && now >= b.fault.until) {
+        this.resolveAlarmFor(store, b.id, b.fault.error.errorType)
+        b.fault = null
+        b.status = b.mission ? 'EXECUTING' : 'EXECUTING'
+      }
+      // random transient fault
+      if (!b.fault && !b.paused && b.status === 'EXECUTING' && Math.random() < FAULT_CHANCE) {
+        this.raiseFault(store, b, now)
+      }
+
+      // paused / faulted robots hold position but keep reporting
+      if (b.paused || b.fault || b.status === 'PAUSE' || b.status === 'ERROR') {
         this.report(store, b, now)
         continue
       }
+
       b.t += b.speed
       if (b.t >= 1) {
-        // reached the end of this edge → count it as a completed leg, hop on
         store.recordOrderCompleted()
-        b.curve = this.nextCurve(b.curve, all)
+        b.curve = this.nextCurve(b, all)
         b.speed = (b.mps * (TICK_MS / 1000)) / curveLength(b.curve)
         b.t = 0
         b.battery = Math.max(5, b.battery - 0.4)
         b.status = b.battery < 15 ? 'CHARGING' : 'EXECUTING'
       }
+
+      // mission progress / arrival
+      if (b.mission) {
+        const p = pointOnCurve(b.curve, b.t)
+        const dist = Math.hypot(p.x - b.mission.tx, p.y - b.mission.ty)
+        const progress = Math.max(0, Math.min(99, Math.round((1 - dist / b.mission.initialDist) * 100)))
+        store.updateMission(b.mission.id, { progress })
+        b.mission.ticks++
+        if (dist <= ARRIVE_DIST) {
+          store.updateMission(b.mission.id, { status: 'FINISHED', progress: 100, finishedAt: new Date().toISOString() })
+          b.mission = null
+        } else if (b.mission.ticks > MISSION_TIMEOUT_TICKS) {
+          store.updateMission(b.mission.id, { status: 'FAILED', finishedAt: new Date().toISOString() })
+          b.mission = null
+        }
+      }
+
+      // battery alarms
+      if (b.battery < LOW_BATTERY && !b.lowBatt) {
+        b.lowBatt = true
+        store.pushAlarm({ id: uid(), agvId: b.id, code: 'BAT_LOW', level: 'WARNING',
+          message: `Battery low (${Math.round(b.battery)}%)`, status: 'ACTIVE', createdAt: new Date().toISOString() })
+      } else if (b.battery >= LOW_BATTERY && b.lowBatt) {
+        b.lowBatt = false
+        this.resolveAlarmFor(store, b.id, 'BAT_LOW')
+      }
+
       this.report(store, b, now)
     }
     store.setMqttLatency(20 + Math.round(Math.random() * 30))
+  }
+
+  private raiseFault(store: ReturnType<typeof useFleetStore.getState>, b: SimBot, now: number) {
+    const faults = [
+      { type: 'OBSTACLE_DETECTED', desc: 'Obstacle blocking path' },
+      { type: 'LOCALIZATION_LOST', desc: 'Localization score below threshold' },
+      { type: 'MOTOR_OVERCURRENT',  desc: 'Drive motor over-current' },
+    ]
+    const f = rand(faults)
+    const error: VDA5050Error = {
+      errorType: f.type, errorLevel: 'FATAL', errorDescription: f.desc, errorReferences: [],
+    }
+    b.fault = { until: now + 3000 + Math.random() * 4000, error }
+    b.status = 'ERROR'
+    store.pushAlarm({ id: uid(), agvId: b.id, code: f.type, level: 'ERROR',
+      message: f.desc, status: 'ACTIVE', createdAt: new Date().toISOString() })
+  }
+
+  private resolveAlarmFor(store: ReturnType<typeof useFleetStore.getState>, agvId: string, code: string) {
+    const a = store.alarms.find(x => x.status === 'ACTIVE' && x.agvId === agvId && x.code === code)
+    if (a) store.resolveAlarm(a.id)
   }
 
   /** Emit one synthetic VDA5050 state for a bot through the store pipeline. */
@@ -176,14 +293,15 @@ export class SimulationService {
     const state: VDA5050State = {
       headerId: now, timestamp: new Date().toISOString(), version: '2.0.0',
       manufacturer: 'ATP', serialNumber: b.id,
-      orderId: b.status === 'EXECUTING' ? `sim-${b.curve.id}` : '', orderUpdateId: 0,
+      orderId: b.mission ? b.mission.id : '', orderUpdateId: 0,
       lastNodeId: '', lastNodeSequenceId: 0,
       driving: b.status === 'EXECUTING',
       agvPosition: { x: pos.x, y: pos.y, theta, mapId: 'sim' },
       velocity: { vx: b.status === 'EXECUTING' ? b.mps : 0, vy: 0, omega: 0 },
       batteryState: { batteryCharge: Math.round(b.battery), charging: b.status === 'CHARGING' },
       operatingMode: b.status,
-      errors: [], warnings: [],
+      errors: b.fault ? [b.fault.error] : [],
+      warnings: [],
       safetyState: { fieldViolation: false, eStop: 'NONE' },
     }
     store.updateFromVDA5050(b.id, state)

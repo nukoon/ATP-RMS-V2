@@ -8,6 +8,7 @@ import type {
   Robot, FleetMap, FleetOrder, MqttLogEntry,
   MapViewConfig, FleetMetrics, VDA5050State, AgvStatus,
 } from '@/types'
+import type { Mission, Alarm } from '@/types/fleet'
 import { DEFAULT_MAP_CONFIG } from '@/constants'
 
 interface FleetStore {
@@ -25,6 +26,17 @@ interface FleetStore {
   setOrders:   (orders: FleetOrder[]) => void
   updateOrder: (id: string, patch: Partial<FleetOrder>) => void
   recordOrderCompleted: () => void
+
+  // Missions (Phase C)
+  missions:    Mission[]
+  addMission:    (m: Mission) => void
+  updateMission: (id: string, patch: Partial<Mission>) => void
+  cancelMission: (id: string) => void
+
+  // Alarms (Phase D)
+  alarms:      Alarm[]
+  pushAlarm:   (a: Alarm) => void
+  resolveAlarm: (id: string) => void
 
   // MQTT Log (ring buffer, max 100)
   mqttLog:     MqttLogEntry[]
@@ -107,6 +119,27 @@ export const useFleetStore = create<FleetStore>()(
       completionTimes.push(Date.now())
       get().recomputeMetrics()
     },
+
+    missions: [],
+    addMission: (m) => set(s => ({ missions: [m, ...s.missions] })),
+    updateMission: (id, patch) =>
+      set(s => ({ missions: s.missions.map(m => m.id === id ? { ...m, ...patch } : m) })),
+    cancelMission: (id) =>
+      set(s => ({ missions: s.missions.map(m =>
+        m.id === id && m.status !== 'FINISHED'
+          ? { ...m, status: 'CANCELLED', finishedAt: new Date().toISOString() }
+          : m) })),
+
+    alarms: [],
+    pushAlarm: (a) =>
+      set(s => {
+        // de-dup: skip if an identical active alarm already exists
+        if (s.alarms.some(x => x.status === 'ACTIVE' && x.agvId === a.agvId && x.code === a.code)) return s
+        return { alarms: [a, ...s.alarms].slice(0, 200) }
+      }),
+    resolveAlarm: (id) =>
+      set(s => ({ alarms: s.alarms.map(a =>
+        a.id === id ? { ...a, status: 'RESOLVED', resolvedAt: new Date().toISOString() } : a) })),
 
     mqttLog: [],
     pushMqttLog: (entry) =>

@@ -10,14 +10,21 @@ import { RobotList }    from '@/components/sidebar/RobotList'
 import { VdaStream }    from '@/components/panels/VdaStream'
 import { MetricsPanel } from '@/components/panels/MetricsPanel'
 import { RobotDetail }  from '@/components/panels/RobotDetail'
+import { OrderPanel }   from '@/components/panels/OrderPanel'
+import { AlarmPanel }   from '@/components/panels/AlarmPanel'
 import { MapToolbar }   from '@/components/map/MapToolbar'
 import { MapCanvas }    from '@/components/map/MapCanvas'
 import { useMapTransform } from '@/hooks/useMapTransform'
+
+type RightTab = 'stream' | 'missions' | 'alarms'
 
 export default function App() {
   const { map, setMap, robots, mqttLog, metrics, mapConfig, setMapConfig, selectedRobotId, setSelectedRobotId, mqttConnected, mqttLatency } = useFleetStore()
   const ctrl = useMapTransform(map)
   const [simOn, setSimOn] = useState(false)
+  const [tab, setTab] = useState<RightTab>('stream')
+  const alarms = useFleetStore(s => s.alarms)
+  const activeAlarms = alarms.filter(a => a.status === 'ACTIVE').length
 
   useEffect(() => {
     loadMap('/maps/origin_20260120205139.json').then(setMap).catch(console.error)
@@ -95,7 +102,7 @@ export default function App() {
           )}
         </div>
 
-        {/* RIGHT PANEL — robot detail when selected, else stream + metrics */}
+        {/* RIGHT PANEL — robot detail when selected, else tabs + metrics */}
         <div style={{ width: 210, background: '#0a1520', borderLeft: '1px solid #152030', display: 'flex', flexDirection: 'column', overflow: 'hidden', flexShrink: 0 }}>
           {selectedRobot ? (
             <RobotDetail
@@ -105,11 +112,33 @@ export default function App() {
             />
           ) : (
             <>
-              <div style={{ borderBottom: '1px solid #152030', padding: '8px 12px' }}>
-                <div style={{ fontSize: 9, letterSpacing: 2, color: '#5a7080', textTransform: 'uppercase', marginBottom: 7 }}>VDA5050 Stream</div>
-                <VdaStream entries={mqttLog} />
+              {/* Tab bar */}
+              <div style={{ display: 'flex', borderBottom: '1px solid #152030', flexShrink: 0 }}>
+                {([['stream', 'STREAM'], ['missions', 'MISSIONS'], ['alarms', 'ALARMS']] as [RightTab, string][]).map(([key, lbl]) => (
+                  <button key={key} onClick={() => setTab(key)}
+                    style={{ flex: 1, padding: '6px 0', fontSize: 9, letterSpacing: 1, fontWeight: 600, cursor: 'pointer',
+                      fontFamily: 'Rajdhani, sans-serif', background: tab === key ? 'rgba(0,212,255,0.08)' : 'transparent',
+                      color: tab === key ? '#00d4ff' : '#5a7080',
+                      border: 'none', borderBottom: tab === key ? '2px solid #00d4ff' : '2px solid transparent' }}>
+                    {lbl}{key === 'alarms' && activeAlarms > 0 && <span style={{ color: '#ff4444' }}> {activeAlarms}</span>}
+                  </button>
+                ))}
               </div>
-              <div style={{ borderBottom: '1px solid #152030', padding: '8px 12px' }}>
+
+              {/* Tab body */}
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+                {tab === 'stream' && (
+                  <div style={{ padding: '8px 12px', overflowY: 'auto' }}>
+                    <div style={{ fontSize: 9, letterSpacing: 2, color: '#5a7080', textTransform: 'uppercase', marginBottom: 7 }}>VDA5050 Stream</div>
+                    <VdaStream entries={mqttLog} />
+                  </div>
+                )}
+                {tab === 'missions' && map && <OrderPanel nodes={map.points} />}
+                {tab === 'alarms' && <AlarmPanel onSelectRobot={setSelectedRobotId} />}
+              </div>
+
+              {/* Metrics always visible */}
+              <div style={{ borderTop: '1px solid #152030', padding: '8px 12px', flexShrink: 0 }}>
                 <div style={{ fontSize: 9, letterSpacing: 2, color: '#5a7080', textTransform: 'uppercase', marginBottom: 7 }}>Fleet Metrics</div>
                 <MetricsPanel metrics={metrics} />
               </div>
