@@ -4,9 +4,11 @@
  */
 import { useEffect, useRef, useCallback } from 'react'
 import type { FleetMap, Robot, MapViewConfig } from '@/types'
+import type { Storage } from '@/types/fleet'
 import type { Transform } from '@/utils/canvas'
 import { worldToScreen, screenToWorld, thetaToScreenRot } from '@/utils/canvas'
 import { STATUS_COLOR, AGV_ASSET_PATH } from '@/constants'
+import { useStorageStore } from '@/store/storage.store'
 import type { useMapTransform } from '@/hooks/useMapTransform'
 
 interface Props {
@@ -18,6 +20,8 @@ interface Props {
   onHover?: (world: { x: number; y: number } | null) => void
   ctrl: ReturnType<typeof useMapTransform>
 }
+
+const EMPTY_SET: Set<string> = new Set()
 
 // Image cache
 const imgCache = new Map<string, HTMLImageElement>()
@@ -38,6 +42,10 @@ export function MapCanvas({ map, robots, config, selectedRobotId, onRobotClick, 
   tRef.current = t
   const fittedRef = useRef(false)
   const movedRef  = useRef(false)
+  // storages are read from the store and drawn each frame via a ref
+  const storages = useStorageStore(s => s.storages)
+  const storagesRef = useRef<Storage[]>(storages)
+  storagesRef.current = storages
 
   // Keep canvas pixel size in sync with its CSS box; fit map on first size
   useEffect(() => {
@@ -72,7 +80,12 @@ export function MapCanvas({ map, robots, config, selectedRobotId, onRobotClick, 
     drawZones(ctx, map, tt, config)
     drawEdges(ctx, map, tt, config)
     robots.forEach(r => drawRobotPath(ctx, map, r, tt, config))
-    drawNodes(ctx, map, tt, config)
+    // when storage is shown, its icon stands in for the bound node (hide that node)
+    const storageNodes = config.showStorage
+      ? new Set(storagesRef.current.filter(s => s.enabled).map(s => s.nodeId))
+      : EMPTY_SET
+    drawNodes(ctx, map, tt, config, storageNodes)
+    if (config.showStorage) drawStorages(ctx, map, storagesRef.current, tt, config)
     robots.forEach(r => drawRobot(ctx, r, tt, config, selectedRobotId))
 
     animRef.current = requestAnimationFrame(draw)
@@ -149,13 +162,58 @@ export function MapCanvas({ map, robots, config, selectedRobotId, onRobotClick, 
 function drawGrid(ctx: CanvasRenderingContext2D, w: number, h: number, t: Transform) {
   const step = 5 * t.scale
   if (step < 8) return
-  ctx.strokeStyle = 'rgba(0,212,255,0.022)'
+  ctx.strokeStyle = 'rgba(100,116,139,0.10)'
   ctx.lineWidth = 1
   for (let x = ((t.offsetX % step) + step) % step; x < w; x += step) {
     ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke()
   }
   for (let y = ((t.offsetY % step) + step) % step; y < h; y += step) {
     ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke()
+  }
+}
+
+// Storage markers: an SVG crate icon drawn ON TOP of the bound AP/LM node
+// (FULL = loaded green crate, EMPTY = grey outline crate). Toggle "Store" off
+// to reveal the node + its name underneath.
+const STORAGE_ICON = { EMPTY: '/assets/icons/storage_empty.svg', FULL: '/assets/icons/storage_full.svg' }
+const STORAGE_M = 1.6   // carton footprint in metres — scales true-to-map like robots
+
+function drawStorages(ctx: CanvasRenderingContext2D, map: FleetMap, storages: Storage[], t: Transform, cfg: MapViewConfig) {
+  // Proportional to the map (metres × zoom) so it tracks zoom smoothly, with a
+  // small px floor so it stays visible when zoomed far out. No upper clamp.
+  const sz = Math.max(14, STORAGE_M * t.scale)
+  const half = sz / 2
+  for (const s of storages) {
+    if (!s.enabled) continue
+    const node = map.points.find(p => p.id === s.nodeId)
+    if (!node) continue
+    const { sx, sy } = worldToScreen(node.x, node.y, t)
+    const full = s.state === 'FULL'
+    const col = full ? '#16a34a' : '#7c93a8'
+
+    const img = getCachedImg(full ? STORAGE_ICON.FULL : STORAGE_ICON.EMPTY)
+    if (img.complete && img.naturalWidth > 0) {
+      ctx.drawImage(img, sx - half, sy - half, sz, sz)
+    } else {
+      // vector fallback until the SVG loads
+      const h = sz * 0.34
+      ctx.beginPath(); ctx.roundRect(sx - h, sy - h, h * 2, h * 2, 2)
+      ctx.fillStyle = full ? 'rgba(22,163,74,0.22)' : 'rgba(124,147,168,0.15)'
+      ctx.strokeStyle = col; ctx.lineWidth = 1.5; ctx.fill(); ctx.stroke()
+    }
+
+    // name label above the icon (respect the label zoom threshold)
+    if (t.scale >= cfg.labelZoomThreshold) {
+      const lbl = s.name
+      ctx.font = `bold ${Math.max(8, cfg.labelSize - 2)}px Roboto Mono, "Noto Sans JP", monospace`
+      ctx.textAlign = 'center'
+      const lw = ctx.measureText(lbl).width
+      const ly = sy - half - 3
+      ctx.fillStyle = 'rgba(255,255,255,0.82)'
+      ctx.fillRect(sx - lw / 2 - 2, ly - 9, lw + 4, 11)
+      ctx.fillStyle = col
+      ctx.fillText(lbl, sx, ly)
+    }
   }
 }
 
@@ -171,16 +229,16 @@ function drawZones(ctx: CanvasRenderingContext2D, map: FleetMap, t: Transform, c
       ctx.lineTo(x2, y2)
     }
     ctx.closePath()
-    ctx.fillStyle = 'rgba(0,212,255,0.03)'
-    ctx.strokeStyle = 'rgba(0,212,255,0.1)'
-    ctx.lineWidth = 1
+    ctx.fillStyle = 'rgba(37,99,235,0.05)'
+    ctx.strokeStyle = 'rgba(37,99,235,0.30)'
+    ctx.lineWidth = 1.2
     ctx.fill(); ctx.stroke()
     if (t.scale > 0.8) {
       const cx = area.poly.reduce((s, p) => s + p.x, 0) / area.poly.length
       const cy = area.poly.reduce((s, p) => s + p.y, 0) / area.poly.length
       const { sx: lx, sy: ly } = worldToScreen(cx, cy, t)
-      ctx.font = `${Math.round(cfg.labelSize * 0.85)}px Rajdhani, sans-serif`
-      ctx.fillStyle = 'rgba(0,212,255,0.22)'
+      ctx.font = `${Math.round(cfg.labelSize * 0.85)}px Inter, "Noto Sans JP", sans-serif`
+      ctx.fillStyle = 'rgba(37,99,235,0.45)'
       ctx.textAlign = 'center'
       ctx.fillText(area.id, lx, ly)
     }
@@ -189,23 +247,23 @@ function drawZones(ctx: CanvasRenderingContext2D, map: FleetMap, t: Transform, c
 
 function drawEdges(ctx: CanvasRenderingContext2D, map: FleetMap, t: Transform, cfg: MapViewConfig) {
   if (!cfg.showEdges) return
-  const lw = Math.max(0.5, t.scale * 0.3)
+  const lw = Math.max(1.2, t.scale * 0.45)
   for (const c of map.curves) {
     const { sx: ax, sy: ay } = worldToScreen(c.sx, c.sy, t)
     const { sx: bx, sy: by } = worldToScreen(c.ex, c.ey, t)
     if (Math.max(ax, bx) < -10 || Math.min(ax, bx) > ctx.canvas.width + 10) continue
     ctx.beginPath(); ctx.lineWidth = lw
     if (c.type === 'bezier' && c.cp.length >= 2) {
-      ctx.strokeStyle = 'rgba(0,180,220,0.2)'; ctx.setLineDash([])
+      ctx.strokeStyle = 'rgba(37,99,235,0.55)'; ctx.setLineDash([])
       const { sx: c1x, sy: c1y } = worldToScreen(c.cp[0].x, c.cp[0].y, t)
       const { sx: c2x, sy: c2y } = worldToScreen(c.cp[1].x, c.cp[1].y, t)
       ctx.moveTo(ax, ay); ctx.bezierCurveTo(c1x, c1y, c2x, c2y, bx, by)
     } else if (c.type === 'bezier' && c.cp.length === 1) {
-      ctx.strokeStyle = 'rgba(0,180,220,0.2)'; ctx.setLineDash([])
+      ctx.strokeStyle = 'rgba(37,99,235,0.55)'; ctx.setLineDash([])
       const { sx: cpx, sy: cpy } = worldToScreen(c.cp[0].x, c.cp[0].y, t)
       ctx.moveTo(ax, ay); ctx.quadraticCurveTo(cpx, cpy, bx, by)
     } else {
-      ctx.strokeStyle = 'rgba(21,32,48,0.9)'; ctx.setLineDash([2, 3])
+      ctx.strokeStyle = 'rgba(100,116,139,0.6)'; ctx.setLineDash([3, 3])
       ctx.moveTo(ax, ay); ctx.lineTo(bx, by)
     }
     ctx.stroke()
@@ -213,10 +271,12 @@ function drawEdges(ctx: CanvasRenderingContext2D, map: FleetMap, t: Transform, c
   ctx.setLineDash([])
 }
 
-function drawNodes(ctx: CanvasRenderingContext2D, map: FleetMap, t: Transform, cfg: MapViewConfig) {
+function drawNodes(ctx: CanvasRenderingContext2D, map: FleetMap, t: Transform, cfg: MapViewConfig, hiddenNodes: Set<string>) {
   const r = cfg.nodeSize
   const showLbl = t.scale >= cfg.labelZoomThreshold
   for (const p of map.points) {
+    // a storage icon stands in for this node (until Store is toggled off)
+    if (hiddenNodes.has(p.id)) continue
     if (p.cls === 'LocationMark' && !cfg.showLM) continue
     if (p.cls === 'ActionPoint'  && !cfg.showAP) continue
     if (p.cls === 'Charge'       && !cfg.showCH) continue
@@ -225,21 +285,21 @@ function drawNodes(ctx: CanvasRenderingContext2D, map: FleetMap, t: Transform, c
     if (sy < -20 || sy > ctx.canvas.height + 20) continue
     ctx.beginPath(); ctx.arc(sx, sy, r, 0, Math.PI * 2)
     if (p.cls === 'Charge') {
-      ctx.fillStyle = 'rgba(255,184,0,0.3)'; ctx.strokeStyle = '#ffb800'; ctx.lineWidth = 1.3
+      ctx.fillStyle = 'rgba(245,158,11,0.55)'; ctx.strokeStyle = '#b45309'; ctx.lineWidth = 1.6
     } else if (p.cls === 'ActionPoint') {
-      ctx.fillStyle = 'rgba(255,140,0,0.16)'; ctx.strokeStyle = 'rgba(255,140,0,0.65)'; ctx.lineWidth = 0.9
+      ctx.fillStyle = 'rgba(234,122,0,0.35)'; ctx.strokeStyle = '#c2410c'; ctx.lineWidth = 1.4
     } else {
-      ctx.fillStyle = 'rgba(0,212,255,0.08)'; ctx.strokeStyle = 'rgba(0,212,255,0.4)'; ctx.lineWidth = 0.8
+      ctx.fillStyle = 'rgba(37,99,235,0.35)'; ctx.strokeStyle = '#1d4ed8'; ctx.lineWidth = 1.4
     }
     ctx.fill(); ctx.stroke()
     if (showLbl) {
-      ctx.font = `${cfg.labelSize}px Share Tech Mono, monospace`
+      ctx.font = `${cfg.labelSize}px Roboto Mono, "Noto Sans JP", monospace`
       ctx.textAlign = 'center'
       const tw = ctx.measureText(p.id).width
       const ly = sy + r + cfg.labelSize + 1
-      ctx.fillStyle = 'rgba(6,10,16,0.78)'
+      ctx.fillStyle = 'rgba(255,255,255,0.92)'
       ctx.fillRect(sx - tw / 2 - 1, ly - cfg.labelSize + 1, tw + 2, cfg.labelSize + 1)
-      ctx.fillStyle = p.cls === 'Charge' ? '#ffb800' : p.cls === 'ActionPoint' ? '#ff9933' : 'rgba(0,212,255,0.75)'
+      ctx.fillStyle = p.cls === 'Charge' ? '#b45309' : p.cls === 'ActionPoint' ? '#c2410c' : '#1d4ed8'
       ctx.fillText(p.id, sx, ly)
     }
   }
@@ -249,7 +309,7 @@ function drawRobotPath(ctx: CanvasRenderingContext2D, map: FleetMap, r: Robot, t
   if (!cfg.showPaths || r.path.length < 2) return
   const nodeMap = new Map(map.points.map(p => [p.id, p]))
   const col = STATUS_COLOR[r.status]
-  ctx.beginPath(); ctx.strokeStyle = col + '25'
+  ctx.beginPath(); ctx.strokeStyle = col + '66'
   ctx.lineWidth = Math.max(2, t.scale * 0.7); ctx.setLineDash([])
   let first = true
   for (const id of r.path) {
@@ -290,9 +350,9 @@ function drawRobot(ctx: CanvasRenderingContext2D, r: Robot, t: Transform, cfg: M
   ctx.restore()
   // Label
   const lblSz = Math.max(8, cfg.labelSize - 1)
-  ctx.font = `bold ${lblSz}px Share Tech Mono, monospace`; ctx.textAlign = 'center'
+  ctx.font = `bold ${lblSz}px Roboto Mono, "Noto Sans JP", monospace`; ctx.textAlign = 'center'
   const lw = ctx.measureText(r.id).width; const lby = sy + half + lblSz + 4
-  ctx.fillStyle = 'rgba(6,10,16,0.85)'
+  ctx.fillStyle = 'rgba(255,255,255,0.85)'
   ctx.fillRect(sx - lw / 2 - 2, lby - lblSz, lw + 4, lblSz + 2)
   ctx.fillStyle = col; ctx.fillText(r.id, sx, lby)
   // Selection ring

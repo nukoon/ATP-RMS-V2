@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- closed carton box (isometric), loaded = green -->
+  <!-- top lid -->
+  <path d="M10 20 L32 12 L54 20 L32 28 Z" fill="rgba(0,255,136,0.45)" stroke="#00ff88" stroke-width="2.5" stroke-linejoin="round"/>
+  <!-- left face -->
+  <path d="M10 20 L32 28 L32 54 L10 46 Z" fill="rgba(0,255,136,0.28)" stroke="#00ff88" stroke-width="2.5" stroke-linejoin="round"/>
+  <!-- right face -->
+  <path d="M54 20 L32 28 L32 54 L54 46 Z" fill="rgba(0,255,136,0.16)" stroke="#00ff88" stroke-width="2.5" stroke-linejoin="round"/>
+  <!-- packing tape down the seam -->
+  <path d="M32 28 V54" stroke="#0a1520" stroke-width="1.8"/>
+  <path d="M10 20 L32 28 L54 20" fill="none" stroke="#0a1520" stroke-width="1.2" opacity="0.5"/>
+</svg>

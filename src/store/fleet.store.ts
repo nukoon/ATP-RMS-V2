@@ -10,6 +10,14 @@ import type {
 } from '@/types'
 import type { Mission, Alarm } from '@/types/fleet'
 import { DEFAULT_MAP_CONFIG } from '@/constants'
+import { api } from '@/services/api'
+
+// Persist a mission status transition to the DB (fire-and-forget). Only called
+// on real status changes — never on per-tick progress — to bound API writes.
+function syncMission(id: string, patch: Partial<Mission>) {
+  if (!/^\d+$/.test(id)) return // only DB-backed missions (numeric id)
+  api.patchMission(id, patch).catch(() => {})
+}
 
 interface FleetStore {
   // Map
@@ -122,13 +130,17 @@ export const useFleetStore = create<FleetStore>()(
 
     missions: [],
     addMission: (m) => set(s => ({ missions: [m, ...s.missions] })),
-    updateMission: (id, patch) =>
-      set(s => ({ missions: s.missions.map(m => m.id === id ? { ...m, ...patch } : m) })),
-    cancelMission: (id) =>
+    updateMission: (id, patch) => {
+      set(s => ({ missions: s.missions.map(m => m.id === id ? { ...m, ...patch } : m) }))
+      // Persist meaningful transitions only (status set); skip progress-only ticks.
+      if (patch.status !== undefined) syncMission(id, patch)
+    },
+    cancelMission: (id) => {
+      const patch = { status: 'CANCELLED' as const, finishedAt: new Date().toISOString() }
       set(s => ({ missions: s.missions.map(m =>
-        m.id === id && m.status !== 'FINISHED'
-          ? { ...m, status: 'CANCELLED', finishedAt: new Date().toISOString() }
-          : m) })),
+        m.id === id && m.status !== 'FINISHED' ? { ...m, ...patch } : m) }))
+      syncMission(id, patch)
+    },
 
     alarms: [],
     pushAlarm: (a) =>

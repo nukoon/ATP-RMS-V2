@@ -91,6 +91,8 @@ CREATE TABLE `agv` (
   `name`          VARCHAR(64),                       -- e.g. AMR-001
   `agv_type_id`   INT NOT NULL,
   `manufacturer`  VARCHAR(32) DEFAULT 'ATP',
+  `color`         VARCHAR(16) DEFAULT '#00d4ff',     -- UI identity colour (Add AMR)
+  `enabled`       TINYINT DEFAULT 1,                 -- include when connecting LIVE
   `ip`            VARCHAR(32),
   `status`        VARCHAR(16) DEFAULT 'OFFLINE',     -- IDLE/EXECUTING/CHARGING/ERROR/PAUSE/TRAFFIC/UNAVAILABLE/OFFLINE
   `battery`       DECIMAL(5,2) DEFAULT 0,
@@ -113,7 +115,7 @@ DROP TABLE IF EXISTS `mission`;
 CREATE TABLE `mission` (
   `id`            BIGINT PRIMARY KEY AUTO_INCREMENT,
   `mission_no`    VARCHAR(32) NOT NULL UNIQUE,
-  `agv_id`        INT,
+  `agv_id`        VARCHAR(64),                       -- robot id / serial (runtime), nullable
   `type`          VARCHAR(16),                       -- TRANSPORT / CHARGE / MOVE
   `status`        VARCHAR(16) DEFAULT 'PENDING',     -- PENDING/ASSIGNED/EXECUTING/FINISHED/FAILED/CANCELLED
   `priority`      INT DEFAULT 5,                     -- 1 = highest .. 9 = lowest
@@ -121,12 +123,70 @@ CREATE TABLE `mission` (
   `end_node`      VARCHAR(32),
   `progress`      INT DEFAULT 0,                     -- 0..100
   `payload`       VARCHAR(255),                      -- JSON extra params
+  `pickup_storage_id`  INT NULL,                     -- storage picked up FROM
+  `dropoff_storage_id` INT NULL,                     -- storage delivered TO
+  `actions`       JSON NULL,                         -- resolved VDA5050 action plan snapshot
   `created_at`    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   `assigned_at`   TIMESTAMP NULL,
   `started_at`    TIMESTAMP NULL,
   `finished_at`   TIMESTAMP NULL,
   INDEX idx_agv (agv_id),
   INDEX idx_status (status)
+);
+
+-- ──────────────────────────────────────────────
+-- Storage locations (pickup / delivery points) — bound to a map node
+-- ──────────────────────────────────────────────
+DROP TABLE IF EXISTS `storage`;
+CREATE TABLE `storage` (
+  `id`            INT PRIMARY KEY AUTO_INCREMENT,
+  `name`          VARCHAR(64) NOT NULL UNIQUE,       -- e.g. ST-A1 (referenced by missions)
+  `node_id`       VARCHAR(32) NOT NULL,              -- bound map location node (FleetMap point id)
+  `map_id`        INT NULL,
+  `kind`          VARCHAR(8) DEFAULT 'BOTH',         -- PICK / DROP / BOTH
+  `state`         VARCHAR(8) DEFAULT 'EMPTY',        -- EMPTY / FULL
+  `label`         VARCHAR(64),                       -- payload / description
+  `enabled`       TINYINT DEFAULT 1,
+  `created_at`    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  `updated_at`    TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_node (node_id)
+);
+
+-- ──────────────────────────────────────────────
+-- VDA5050 action templates (reusable operations) — liftUp, trayRotate, …
+-- ──────────────────────────────────────────────
+DROP TABLE IF EXISTS `vda_action`;
+CREATE TABLE `vda_action` (
+  `id`            INT PRIMARY KEY AUTO_INCREMENT,
+  `code`          VARCHAR(32) NOT NULL UNIQUE,       -- liftUp, liftDown, trayRotate, ...
+  `action_type`   VARCHAR(48) NOT NULL,              -- VDA5050 actionType sent on the wire
+  `name`          VARCHAR(64),                       -- display name
+  `blocking_type` VARCHAR(8) DEFAULT 'HARD',         -- NONE / SOFT / HARD
+  `description`   VARCHAR(255),
+  `default_params` JSON NULL,                        -- [{key,value}] default actionParameters
+  `created_at`    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+INSERT INTO `vda_action` (code, action_type, name, blocking_type, description, default_params) VALUES
+('liftUp',     'liftUp',     'Lift Up',     'HARD', 'Raise the lift/fork to carry load',  JSON_ARRAY()),
+('liftDown',   'liftDown',   'Lift Down',   'HARD', 'Lower the lift/fork to release load', JSON_ARRAY()),
+('trayRotate', 'trayRotate', 'Tray Rotate', 'HARD', 'Rotate the tray',                    JSON_ARRAY(JSON_OBJECT('key','angle','value',90))),
+('pick',       'pick',       'Pick',        'HARD', 'Pick load at station',               JSON_ARRAY()),
+('drop',       'drop',       'Drop',        'HARD', 'Drop load at station',               JSON_ARRAY()),
+('wait',       'wait',       'Wait',        'NONE', 'Dwell for a duration',               JSON_ARRAY(JSON_OBJECT('key','duration','value',3)));
+
+-- ──────────────────────────────────────────────
+-- Storage → action bindings (which actions run at PICK / DROP, ordered)
+-- ──────────────────────────────────────────────
+DROP TABLE IF EXISTS `storage_action`;
+CREATE TABLE `storage_action` (
+  `id`            INT PRIMARY KEY AUTO_INCREMENT,
+  `storage_id`    INT NOT NULL,
+  `vda_action_id` INT NOT NULL,
+  `stage`         VARCHAR(8) NOT NULL,               -- PICK / DROP
+  `seq`           INT DEFAULT 0,                     -- order within the stage
+  `params`        JSON NULL,                         -- override actionParameters (else template default)
+  INDEX idx_storage (storage_id)
 );
 
 -- ──────────────────────────────────────────────

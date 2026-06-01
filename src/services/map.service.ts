@@ -11,12 +11,14 @@ interface RawMapPoint {
   pos: { x: number; y: number; theta: number }
 }
 
+interface RawMapCurveProp { key: string; int32Value?: number }
 interface RawMapCurve {
   instanceName: string
   routeType: 'line' | 'bezier'
   startPos: { pos: { x: number; y: number }; instanceName: string }
   endPos:   { pos: { x: number; y: number }; instanceName: string }
   trajectory?: { controlPoints?: { x: number; y: number }[] }
+  property?: RawMapCurveProp[]
 }
 
 interface RawMapArea {
@@ -58,6 +60,8 @@ export function parseMap(raw: RawMap): FleetMap {
     ex:    c.endPos.pos.x,
     ey:    c.endPos.pos.y,
     cp:    c.trajectory?.controlPoints ?? [],
+    // ATP "direction" property: 0 = Forward (正向), 1 = Reverse (反向)
+    reverse: (c.property?.find(p => p.key === 'direction')?.int32Value ?? 0) === 1,
   }))
 
   const areas: MapArea[] = (raw.advancedAreaList ?? []).map(a => ({

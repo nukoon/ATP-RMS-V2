@@ -37,10 +37,67 @@ export interface Mission {
   endNode: string
   progress: number       // 0..100
   payload?: string
+  // Storage-based transport (pickup → dropoff), referenced by storage id/name
+  pickupStorageId?: string | null
+  dropoffStorageId?: string | null
+  pickupStorageName?: string | null
+  dropoffStorageName?: string | null
+  actions?: MissionAction[]   // resolved VDA5050 action plan snapshot
   createdAt: string
   assignedAt?: string | null
   startedAt?: string | null
   finishedAt?: string | null
+}
+
+// One resolved action in a mission plan (snapshot of a template + overrides).
+export interface MissionAction {
+  stage: ActionStage          // PICK (at pickup node) / DROP (at dropoff node)
+  actionType: string          // VDA5050 actionType
+  blockingType: 'NONE' | 'SOFT' | 'HARD'
+  description?: string
+  params: ActionParam[]
+}
+
+// ── Storage areas (pickup / delivery points) ───────────────
+export type StorageState = 'EMPTY' | 'FULL'
+export type StorageKind  = 'PICK' | 'DROP' | 'BOTH'
+
+export interface Storage {
+  id: string
+  name: string                // referenced by missions, e.g. ST-A1
+  nodeId: string              // bound map location node id
+  mapId?: string | null
+  kind: StorageKind
+  state: StorageState
+  label?: string
+  enabled: boolean
+}
+
+// ── VDA5050 action templates + per-storage bindings ────────
+export type ActionStage = 'PICK' | 'DROP'
+
+export interface ActionParam {
+  key: string
+  value: string | number | boolean
+}
+
+export interface VdaActionTemplate {
+  id: string
+  code: string                // liftUp, liftDown, trayRotate, ...
+  actionType: string          // VDA5050 actionType on the wire
+  name?: string
+  blockingType: 'NONE' | 'SOFT' | 'HARD'
+  description?: string
+  defaultParams: ActionParam[]
+}
+
+export interface StorageActionBinding {
+  id?: string
+  storageId: string
+  actionId: string            // vda_action template id
+  stage: ActionStage
+  seq: number
+  params?: ActionParam[]      // override (else template default)
 }
 
 // Alarms / Events

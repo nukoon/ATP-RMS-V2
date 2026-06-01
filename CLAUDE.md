@@ -4,20 +4,21 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-ATP-RMS-V2 — a real-time Fleet Management Dashboard ("Digital Twin") for ATP's autonomous mobile robots (AMRs/AGVs). The browser talks **VDA5050 v2.0 over MQTT** and renders robots on a **2D canvas** map built from the **ATP map format**. There is no backend in this repo — the MQTT broker is the integration boundary. A built-in **simulator** drives the whole UI without any broker, so the app is fully usable offline. UI/docs mix English and Thai.
+ATP-RMS-V2 — a real-time Fleet Management Dashboard ("Digital Twin") for ATP's autonomous mobile robots (AMRs/AGVs). The browser talks **VDA5050 v2.0 over MQTT** and renders robots on a **2D canvas** map built from the **ATP map format**. The MQTT broker is the live-telemetry integration boundary. A small **Express backend** (`server/`, on :8080) fronts the `atp_rms` MySQL DB for **login (JWT) + a persisted AMR registry**; the rest of the app is broker/sim-driven and works offline. A built-in **simulator** drives the whole UI without any broker. UI/docs mix English and Thai.
 
 ## Commands
 
 ```bash
-npm install          # install dependencies
+npm install          # install dependencies (frontend + backend share one package.json)
 npm run dev          # Vite dev server → http://localhost:5173 ( /api proxied to :8080 )
+npm run server       # Express backend (server/index.js) → http://localhost:8080  (needs MySQL + server/.env)
 npm run build        # tsc (type-check) then vite build  — run this to verify; it must pass
 npm run preview      # serve the production build
 npm run lint         # eslint src --ext ts,tsx --report-unused-disable-directives
 npm run type-check   # tsc --noEmit
 ```
 
-Node.js 18+. **No test runner is configured** — don't assume `npm test`. The build runs `tsc` with `noUnusedLocals`/`noUnusedParameters`, so unused vars/imports fail the build; keep it clean.
+Node.js 18+. **No test runner is configured** — don't assume `npm test`. The build runs `tsc` with `noUnusedLocals`/`noUnusedParameters`, so unused vars/imports fail the build; keep it clean. Login + Add-AMR need the backend up (`npm run server`); SIM/static-map work without it. Default login: **admin / admin123**.
 
 ## Three run modes (top-bar buttons)
 
@@ -33,9 +34,21 @@ AGV ─VDA5050/MQTT─► mqtt.service ──┼─► useFleetStore (Zustand) �
                                    └─ both feed the SAME store.updateFromVDA5050 pipeline
 ```
 
-Stack: React 18 + TypeScript 5 + Vite, **Zustand** stores (`zustand` + `persist`), **mqtt.js v5** over WebSocket, a hand-written **2D canvas** renderer (NOT react-konva/Leaflet despite those being in package.json — the map is drawn imperatively in `MapCanvas.tsx` via `utils/canvas.ts`). Styling is **inline styles, dark cyber-HUD theme** (Tailwind/PostCSS are installed but unused).
+Stack: React 18 + TypeScript 5 + Vite, **Zustand** stores (`zustand` + `persist`), **mqtt.js v5** over WebSocket, a hand-written **2D canvas** renderer (NOT react-konva/Leaflet despite those being in package.json — the map is drawn imperatively in `MapCanvas.tsx` via `utils/canvas.ts`). Styling is **inline styles, light "Andon" factory theme** (Tailwind/PostCSS are installed but unused).
+- **Theme palette (hardcoded hex — keep consistent when adding UI):** app bg `#eef1f5`, panels `#ffffff`, inputs/toolbar `#f3f6fa`, borders `#d4dae3`; text primary `#1a2230`, secondary `#4a5568`, muted `#64748b`, faint `#94a3b4`; accent (links/active) `#2563eb`; status green `#16a34a`, amber `#f59e0b`, orange `#ea7a00`, red `#dc2626`, purple `#7c3aed` (also `STATUS_COLOR` in [constants](src/constants/index.ts)). Fonts: sans `'Inter','Noto Sans JP',sans-serif`, mono `'Roboto Mono','Noto Sans JP',monospace` (loaded in [index.html](index.html)). Was a dark cyber-HUD originally; switched 2026-06-01 via a palette/font sweep.
 
 Key design point: **the simulator and a real broker are interchangeable** — both push synthetic/real VDA5050 `state` into `useFleetStore.updateFromVDA5050`, so every panel works identically in SIM or LIVE.
+
+### Backend + auth ([server/](server/), plain CommonJS — NOT TypeScript)
+Express on :8080, talks to `atp_rms` MySQL via **`mysql2`** as a dedicated low-priv user **`atp_app`** (NOT the legacy root — creds in `server/.env`, gitignored; see `server/.env.example`). Endpoints (all but login/me require `Authorization: Bearer <jwt>`, `server/auth.js`): `POST /api/auth/login` (bcrypt-compares `sys_user`, returns a **JWT**), `GET /api/auth/me`; `GET/POST/PATCH/DELETE /api/amrs` (AMR registry, `agv`⋈`agv_type`; we added `color`+`enabled` to `agv`); `…/storages` + `…/actions` + `…/storages/:id/actions` + `…/missions` (storage feature, below). `server/seed-admin.js` (re)seeds admin/admin123. **Apply DB changes with the `atp_app` user** (it has ALL on `atp_rms.*`); the temp-cnf pattern + `db/migrations/001_storage_actions.sql` is how the storage tables were added without re-running the destructive full `schema.sql`.
+- Frontend: [src/services/api.ts](src/services/api.ts) is the fetch client (attaches the JWT, clears the session on 401). [src/store/auth.store.ts](src/store/auth.store.ts) persists `{token,user}` to localStorage. [src/components/AuthGate.tsx](src/components/AuthGate.tsx) wraps `<App>` in [main.tsx](src/main.tsx): no token → [LoginPage](src/components/LoginPage.tsx); otherwise validate via `/auth/me` once. **AMRs are no longer persisted in localStorage** — `config.store` loads/creates/updates/deletes them through `api` (`loadAmrs()` is called on App mount and when the AMRs config tab opens). Maps + broker stay in localStorage.
+
+### Storage areas + VDA5050 action missions
+**Storages** are named pickup/delivery points bound to a map node, each EMPTY/FULL (DB tables `storage`, `vda_action` action templates, `storage_action` bindings; `mission` got `pickup/dropoff_storage_id` + `actions` JSON; `mission.agv_id` is now VARCHAR = runtime robot id). A **mission** = pickup-storage → dropoff-storage (chosen by name in [OrderPanel](src/components/panels/OrderPanel.tsx)); the backend resolves the two nodes + a **VDA5050 action snapshot** from each storage's PICK/DROP bindings (reusable templates: liftUp/trayRotate/liftDown/… with param overrides). On delivery the pickup flips FULL→EMPTY and the dropoff EMPTY→FULL.
+- State: [src/store/storage.store.ts](src/store/storage.store.ts) (DB-backed: storages, templates, bindings) loaded on App mount; missions live in `fleet.store` but `updateMission`/`cancelMission` **fire-and-forget `api.patchMission` only on status changes** (numeric/DB id), never per-tick progress.
+- Simulator ([simulation.service.ts](src/services/simulation.service.ts)) now runs `PARKED → TO_PICKUP → AT_PICKUP (dwell + stream-log PICK actions) → TO_DROPOFF → AT_DROPOFF (DROP actions) → TO_HOME`; `dispatch()` routes to the pickup; `afterDwell` flips storage state via `useStorageStore.setState`.
+- LIVE: [order.service.ts](src/services/order.service.ts) `buildVda5050Order()` turns a mission's action snapshot into a real VDA5050 Order; OrderPanel publishes it via `mqttService.sendOrder` to an enabled AMR when MQTT is connected.
+- UI: right-panel **STORAGE** tab ([StoragePanel](src/components/panels/StoragePanel.tsx), live EMPTY/FULL toggle + quick-add) + a **⚙ MANAGE** overlay ([StorageDialog](src/components/StorageDialog.tsx), storage CRUD + per-stage action binding editor + action-template CRUD). Map markers drawn in [MapCanvas](src/components/map/MapCanvas.tsx) (`drawStorages`, gated by the `showStorage` toolbar toggle).
 
 ### Layout ([src/App.tsx](src/App.tsx))
 top bar (status pills + CONFIG / CONNECT / START SIM) → `MapToolbar` → **[ left `FleetSidebar` | center `MapCanvas` | right panel ]** → bottom `StatusBar`.
@@ -57,6 +70,7 @@ Singleton `simulationService`, the most logic-heavy file. Acts as a mini dispatc
 - On a PENDING mission it dispatches the **nearest free AGV by Dijkstra `shortestPath` cost**, routes it node→node, marks the mission FINISHED on arrival, then routes the AGV **home** to its parking node.
 - **Traffic control** (`resolveTraffic`): a moving AGV reserves a look-ahead zone (`TRAFFIC_RADIUS`); if a higher-priority AGV occupies it the lower one yields (status `TRAFFIC`). Priority: heading-to-target > returning-home.
 - Raises alarms: low-battery WARNING + random transient FATAL faults (auto-recover). Emits VDA5050 state every tick + throttled stream log.
+- **Heading**: while moving, the body eases (shortest-arc) toward `bodyFacing(edge,t)` = the path tangent, **+180° on REVERSE segments** so the AGV backs along them (nose unchanged). Parked heading comes from `parkHeading()` (the connecting lane via `bodyFacing`), since ATP charge-node `theta` is the sentinel `999`. Forward/Reverse is parsed from each curve's ATP `direction` property → `MapCurve.reverse` (0=Forward 正向, 1=Reverse 反向); e.g. AGVs drive forward into a charge dock and reverse back out.
 
 ### Map & coordinates
 [src/services/map.service.ts](src/services/map.service.ts) — plain functions: `loadMap(url)` / `loadMapFromJson(string)` both call `parseMap(raw)` to normalize `advancedPointList`/`advancedCurveList`/`advancedAreaList` into a `FleetMap`; plus `buildNodeMap()`, `getMapBounds()`. The bundled map is ~**61×160 m** (`public/maps/origin_20260120205139.json`).

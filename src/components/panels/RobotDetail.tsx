@@ -10,9 +10,9 @@ interface Props {
 }
 
 const Field = ({ label, value, color }: { label: string; value: string; color?: string }) => (
-  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '3px 0', fontSize: 10, borderBottom: '1px solid rgba(21,32,48,0.5)' }}>
-    <span style={{ color: '#5a7080' }}>{label}</span>
-    <span style={{ fontFamily: 'Share Tech Mono', fontWeight: 600, color: color ?? '#c8d8e8' }}>{value}</span>
+  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '3px 0', fontSize: 10, borderBottom: '1px solid rgba(212,218,227,0.5)' }}>
+    <span style={{ color: '#64748b' }}>{label}</span>
+    <span style={{ fontFamily: 'Roboto Mono', fontWeight: 600, color: color ?? '#1a2230' }}>{value}</span>
   </div>
 )
 
@@ -20,24 +20,24 @@ export function RobotDetail({ robot: r, onClose, onAction }: Props) {
   const col    = STATUS_COLOR[r.status]
   const spec   = AGV_SPECS[r.model]
   const idCol  = colorOf(r.id)
-  const batCol = r.battery.batteryCharge > 50 ? '#00ff88' : r.battery.batteryCharge > 20 ? '#ffb800' : '#ff4444'
+  const batCol = r.battery.batteryCharge > 50 ? '#16a34a' : r.battery.batteryCharge > 20 ? '#f59e0b' : '#dc2626'
   const speed  = Math.hypot(r.velocity.vx, r.velocity.vy)
   const isPaused = r.status === 'PAUSE'
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden', flex: 1 }}>
       {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', borderBottom: '1px solid #152030', background: 'rgba(0,212,255,0.04)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', borderBottom: '1px solid #d4dae3', background: 'rgba(37,99,235,0.04)' }}>
         <span style={{ width: 8, height: 8, borderRadius: '50%', background: idCol, boxShadow: `0 0 6px ${idCol}`, flexShrink: 0 }} />
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontFamily: 'Share Tech Mono', fontSize: 12, color: '#00d4ff' }}>{r.id}</div>
-          <div style={{ fontSize: 9, color: '#5a7080' }}>{spec?.name ?? r.model}</div>
+          <div style={{ fontFamily: 'Roboto Mono', fontSize: 12, color: '#2563eb' }}>{r.id}</div>
+          <div style={{ fontSize: 9, color: '#64748b' }}>{spec?.name ?? r.model}</div>
         </div>
         <span style={{ fontSize: 8, padding: '2px 6px', borderRadius: 2, fontWeight: 700, letterSpacing: 1, color: col, border: `1px solid ${col}40`, background: col + '12' }}>
           {STATUS_LABEL[r.status]}
         </span>
         <button onClick={onClose} title="Close"
-          style={{ background: 'transparent', border: 'none', color: '#5a7080', cursor: 'pointer', fontSize: 14, lineHeight: 1, padding: 0 }}>×</button>
+          style={{ background: 'transparent', border: 'none', color: '#64748b', cursor: 'pointer', fontSize: 14, lineHeight: 1, padding: 0 }}>×</button>
       </div>
 
       <div style={{ overflowY: 'auto', flex: 1, padding: '8px 12px' }}>
@@ -46,10 +46,10 @@ export function RobotDetail({ robot: r, onClose, onAction }: Props) {
           <img src={AGV_ASSET_PATH(r.model, r.status)} style={{ width: 52, height: 52, objectFit: 'contain', flexShrink: 0 }} />
           <div style={{ flex: 1 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, marginBottom: 3 }}>
-              <span style={{ color: '#5a7080' }}>Battery</span>
-              <span style={{ fontFamily: 'Share Tech Mono', color: batCol }}>{Math.round(r.battery.batteryCharge)}%{r.battery.charging ? ' ⚡' : ''}</span>
+              <span style={{ color: '#64748b' }}>Battery</span>
+              <span style={{ fontFamily: 'Roboto Mono', color: batCol }}>{Math.round(r.battery.batteryCharge)}%{r.battery.charging ? ' ⚡' : ''}</span>
             </div>
-            <div style={{ height: 4, background: '#152030', borderRadius: 2, overflow: 'hidden' }}>
+            <div style={{ height: 4, background: '#d4dae3', borderRadius: 2, overflow: 'hidden' }}>
               <div style={{ height: '100%', width: `${r.battery.batteryCharge}%`, background: batCol, transition: 'width 0.5s' }} />
             </div>
           </div>
@@ -75,39 +75,39 @@ export function RobotDetail({ robot: r, onClose, onAction }: Props) {
         </>}
 
         {/* Errors */}
-        <SectionTitle>Errors {r.errors.length > 0 && <span style={{ color: '#ff4444' }}>({r.errors.length})</span>}</SectionTitle>
+        <SectionTitle>Errors {r.errors.length > 0 && <span style={{ color: '#dc2626' }}>({r.errors.length})</span>}</SectionTitle>
         {r.errors.length === 0 ? (
-          <div style={{ fontSize: 10, color: '#3a5060', padding: '4px 0' }}>No active errors</div>
+          <div style={{ fontSize: 10, color: '#94a3b4', padding: '4px 0' }}>No active errors</div>
         ) : r.errors.map((e, i) => (
-          <div key={i} style={{ padding: '4px 0', borderBottom: '1px solid rgba(21,32,48,0.5)' }}>
+          <div key={i} style={{ padding: '4px 0', borderBottom: '1px solid rgba(212,218,227,0.5)' }}>
             <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-              <span style={{ fontSize: 8, padding: '1px 4px', borderRadius: 2, fontWeight: 700, color: e.errorLevel === 'FATAL' ? '#ff4444' : '#ffb800', border: `1px solid ${e.errorLevel === 'FATAL' ? '#ff4444' : '#ffb800'}40` }}>
+              <span style={{ fontSize: 8, padding: '1px 4px', borderRadius: 2, fontWeight: 700, color: e.errorLevel === 'FATAL' ? '#dc2626' : '#f59e0b', border: `1px solid ${e.errorLevel === 'FATAL' ? '#dc2626' : '#f59e0b'}40` }}>
                 {e.errorLevel}
               </span>
-              <span style={{ fontSize: 10, color: '#c8d8e8', fontFamily: 'Share Tech Mono' }}>{e.errorType}</span>
+              <span style={{ fontSize: 10, color: '#1a2230', fontFamily: 'Roboto Mono' }}>{e.errorType}</span>
             </div>
-            {e.errorDescription && <div style={{ fontSize: 9, color: '#5a7080', marginTop: 2 }}>{e.errorDescription}</div>}
+            {e.errorDescription && <div style={{ fontSize: 9, color: '#64748b', marginTop: 2 }}>{e.errorDescription}</div>}
           </div>
         ))}
       </div>
 
       {/* Quick actions */}
-      <div style={{ display: 'flex', gap: 6, padding: '8px 12px', borderTop: '1px solid #152030' }}>
-        <ActionBtn label={isPaused ? 'Resume' : 'Pause'} color={isPaused ? '#00ff88' : '#ffb800'}
+      <div style={{ display: 'flex', gap: 6, padding: '8px 12px', borderTop: '1px solid #d4dae3' }}>
+        <ActionBtn label={isPaused ? 'Resume' : 'Pause'} color={isPaused ? '#16a34a' : '#f59e0b'}
           onClick={() => onAction(isPaused ? 'RESUME' : 'PAUSE')} />
-        <ActionBtn label="Cancel" color="#ff4444" onClick={() => onAction('CANCEL')} />
+        <ActionBtn label="Cancel" color="#dc2626" onClick={() => onAction('CANCEL')} />
       </div>
     </div>
   )
 }
 
 const SectionTitle = ({ children }: { children: React.ReactNode }) => (
-  <div style={{ fontSize: 9, letterSpacing: 2, color: '#5a7080', textTransform: 'uppercase', margin: '10px 0 4px' }}>{children}</div>
+  <div style={{ fontSize: 9, letterSpacing: 2, color: '#64748b', textTransform: 'uppercase', margin: '10px 0 4px' }}>{children}</div>
 )
 
 const ActionBtn = ({ label, color, onClick }: { label: string; color: string; onClick: () => void }) => (
   <button onClick={onClick}
-    style={{ flex: 1, padding: '5px 0', fontSize: 10, borderRadius: 2, cursor: 'pointer', fontFamily: 'Rajdhani, sans-serif', fontWeight: 600, letterSpacing: 1,
+    style={{ flex: 1, padding: '5px 0', fontSize: 10, borderRadius: 2, cursor: 'pointer', fontFamily: 'Inter, "Noto Sans JP", sans-serif', fontWeight: 600, letterSpacing: 1,
       color, border: `1px solid ${color}55`, background: color + '10' }}>
     {label}
   </button>

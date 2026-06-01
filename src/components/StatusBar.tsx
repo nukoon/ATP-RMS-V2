@@ -20,12 +20,12 @@ interface Props {
 const Stat = ({ label, value, color }: { label: string; value: number; color: string }) => (
   <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
     <span style={{ width: 6, height: 6, borderRadius: '50%', background: color, boxShadow: value > 0 ? `0 0 5px ${color}` : 'none', opacity: value > 0 ? 1 : 0.4 }} />
-    <span style={{ color: '#5a7080' }}>{label}</span>
-    <span style={{ color: value > 0 ? '#c8d8e8' : '#3a5060', fontWeight: 600 }}>{value}</span>
+    <span style={{ color: '#64748b' }}>{label}</span>
+    <span style={{ color: value > 0 ? '#1a2230' : '#94a3b4', fontWeight: 600 }}>{value}</span>
   </span>
 )
 
-const Div = () => <span style={{ width: 1, height: 11, background: '#152030', flexShrink: 0 }} />
+const Div = () => <span style={{ width: 1, height: 11, background: '#d4dae3', flexShrink: 0 }} />
 
 export function StatusBar({ robots, missions, map, mqttConnected, cursor, zoom, heading }: Props) {
   // operational states
@@ -37,34 +37,34 @@ export function StatusBar({ robots, missions, map, mqttConnected, cursor, zoom, 
   const m = (s: Mission['status']) => missions.filter(x => x.status === s).length
 
   return (
-    <div style={{ background: '#0a1520', borderTop: '1px solid #152030', padding: '3px 10px', display: 'flex', gap: 10,
-      fontFamily: 'Share Tech Mono', fontSize: 9, color: '#5a7080', alignItems: 'center', flexShrink: 0, overflowX: 'auto', whiteSpace: 'nowrap' }}>
+    <div style={{ background: '#ffffff', borderTop: '1px solid #d4dae3', padding: '3px 10px', display: 'flex', gap: 10,
+      fontFamily: 'Roboto Mono', fontSize: 9, color: '#64748b', alignItems: 'center', flexShrink: 0, overflowX: 'auto', whiteSpace: 'nowrap' }}>
       {/* Operational */}
-      <Stat label="Operating"   value={count('EXECUTING')}   color="#00ff88" />
-      <Stat label="Charging"    value={count('CHARGING')}    color="#ffb800" />
-      <Stat label="Idle"        value={count('IDLE')}        color="#5a7080" />
+      <Stat label="Operating"   value={count('EXECUTING')}   color="#16a34a" />
+      <Stat label="Charging"    value={count('CHARGING')}    color="#f59e0b" />
+      <Stat label="Idle"        value={count('IDLE')}        color="#64748b" />
       <Stat label="Pause"       value={count('PAUSE')}       color="#aaaaaa" />
-      <Stat label="Traffic"     value={count('TRAFFIC')}     color="#ff8c00" />
-      <Stat label="Error"       value={count('ERROR')}       color="#ff4444" />
+      <Stat label="Traffic"     value={count('TRAFFIC')}     color="#ea7a00" />
+      <Stat label="Error"       value={count('ERROR')}       color="#dc2626" />
       <Div />
       {/* Connection */}
-      <Stat label="Online"      value={online}               color="#00d4ff" />
+      <Stat label="Online"      value={online}               color="#2563eb" />
       <Stat label="Offline"     value={offline}              color="#cc4444" />
       <Div />
       {/* Missions */}
-      <Stat label="Running"     value={m('EXECUTING')}       color="#00ff88" />
-      <Stat label="Pending"     value={m('PENDING')}         color="#5a7080" />
-      <Stat label="Done"        value={m('FINISHED')}        color="#3a7050" />
-      <Stat label="Failed"      value={m('FAILED') + m('CANCELLED')} color="#ff4444" />
+      <Stat label="Running"     value={m('EXECUTING')}       color="#16a34a" />
+      <Stat label="Pending"     value={m('PENDING')}         color="#64748b" />
+      <Stat label="Done"        value={m('FINISHED')}        color="#15803d" />
+      <Stat label="Failed"      value={m('FAILED') + m('CANCELLED')} color="#dc2626" />
 
       {/* Right cluster — cursor readout */}
       <div style={{ marginLeft: 'auto', display: 'flex', gap: 10, alignItems: 'center' }}>
-        <span>MQTT <span style={{ color: mqttConnected ? '#00ff88' : '#ff4444' }}>{mqttConnected ? 'UP' : 'DOWN'}</span></span>
+        <span>MQTT <span style={{ color: mqttConnected ? '#16a34a' : '#dc2626' }}>{mqttConnected ? 'UP' : 'DOWN'}</span></span>
         <Div />
-        <span>A:<span style={{ color: '#00d4ff' }}> {heading.toFixed(0)}°</span></span>
-        <span>X:<span style={{ color: '#00d4ff' }}> {cursor ? cursor.x.toFixed(2) : '—'}</span></span>
-        <span>Y:<span style={{ color: '#00d4ff' }}> {cursor ? cursor.y.toFixed(2) : '—'}</span></span>
-        <span>Zoom:<span style={{ color: '#00d4ff' }}> {Math.round(zoom * 100)}%</span></span>
+        <span>A:<span style={{ color: '#2563eb' }}> {heading.toFixed(0)}°</span></span>
+        <span>X:<span style={{ color: '#2563eb' }}> {cursor ? cursor.x.toFixed(2) : '—'}</span></span>
+        <span>Y:<span style={{ color: '#2563eb' }}> {cursor ? cursor.y.toFixed(2) : '—'}</span></span>
+        <span>Zoom:<span style={{ color: '#2563eb' }}> {Math.round(zoom * 100)}%</span></span>
         <Div />
         <span>{map ? `${map.points.length}N · ${map.curves.length}E` : '—'}</span>
       </div>

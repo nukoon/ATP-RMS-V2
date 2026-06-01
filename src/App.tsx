@@ -5,6 +5,8 @@
 import { useEffect, useState } from 'react'
 import { useFleetStore } from '@/store/fleet.store'
 import { useConfigStore } from '@/store/config.store'
+import { useAuthStore } from '@/store/auth.store'
+import { useStorageStore } from '@/store/storage.store'
 import { loadMap, loadMapFromJson } from '@/services/map.service'
 import { simulationService } from '@/services/simulation.service'
 import { mqttService } from '@/services/mqtt.service'
@@ -15,12 +17,14 @@ import { MetricsPanel } from '@/components/panels/MetricsPanel'
 import { RobotDetail }  from '@/components/panels/RobotDetail'
 import { OrderPanel }   from '@/components/panels/OrderPanel'
 import { AlarmPanel }   from '@/components/panels/AlarmPanel'
+import { StoragePanel } from '@/components/panels/StoragePanel'
+import { StorageDialog } from '@/components/StorageDialog'
 import { MapToolbar }   from '@/components/map/MapToolbar'
 import { MapCanvas }    from '@/components/map/MapCanvas'
 import { StatusBar }    from '@/components/StatusBar'
 import { useMapTransform } from '@/hooks/useMapTransform'
 
-type RightTab = 'stream' | 'missions' | 'alarms'
+type RightTab = 'stream' | 'missions' | 'storage' | 'alarms'
 
 export default function App() {
   const { map, setMap, robots, mqttLog, metrics, mapConfig, setMapConfig, selectedRobotId, setSelectedRobotId, mqttConnected } = useFleetStore()
@@ -31,12 +35,21 @@ export default function App() {
   const [showConfig, setShowConfig] = useState(false)
   const [configTab, setConfigTab] = useState<'amrs' | 'maps' | 'broker'>('amrs')
   const [live, setLive] = useState(false)
+  const [showStorageDialog, setShowStorageDialog] = useState(false)
   const openConfig = (t: 'amrs' | 'maps' | 'broker') => { setConfigTab(t); setShowConfig(true) }
   const alarms = useFleetStore(s => s.alarms)
   const missions = useFleetStore(s => s.missions)
   const activeAlarms = alarms.filter(a => a.status === 'ACTIVE').length
 
-  const { maps, activeMapId, amrs, broker } = useConfigStore()
+  const { maps, activeMapId, amrs, broker, loadAmrs } = useConfigStore()
+  const authUser = useAuthStore(s => s.user)
+  const clearAuth = useAuthStore(s => s.clearAuth)
+
+  const loadStorages = useStorageStore(s => s.loadAll)
+
+  // Load the operator's registered AMRs + storages from the DB on entry.
+  useEffect(() => { loadAmrs().catch(err => console.error('[AMR] load failed', err)) }, [loadAmrs])
+  useEffect(() => { loadStorages().catch(err => console.error('[STORAGE] load failed', err)) }, [loadStorages])
 
   // load the active map (builtin URL or uploaded JSON) whenever it changes
   useEffect(() => {
@@ -86,14 +99,14 @@ export default function App() {
   const selectedRobot = selectedRobotId ? robots.get(selectedRobotId) ?? null : null
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: '#060a10', color: '#c8d8e8', fontFamily: 'Rajdhani, sans-serif' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: '#eef1f5', color: '#1a2230', fontFamily: 'Inter, "Noto Sans JP", sans-serif' }}>
       {/* TOP BAR */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '6px 14px', background: '#0a1520', borderBottom: '1px solid #152030', flexShrink: 0 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '6px 14px', background: '#ffffff', borderBottom: '1px solid #d4dae3', flexShrink: 0 }}>
         <img src="/assets/brand/logo_atp.png" style={{ height: 28, objectFit: 'contain' }} />
-        <span style={{ width: 1, height: 20, background: '#152030', margin: '0 4px' }} />
-        <span style={{ fontFamily: 'Share Tech Mono', fontSize: 9, color: '#5a7080', letterSpacing: 2 }}>DIGITAL TWIN · FLEET MANAGEMENT</span>
+        <span style={{ width: 1, height: 20, background: '#d4dae3', margin: '0 4px' }} />
+        <span style={{ fontFamily: 'Roboto Mono', fontSize: 9, color: '#64748b', letterSpacing: 2 }}>DIGITAL TWIN · FLEET MANAGEMENT</span>
         <div style={{ display: 'flex', gap: 14, marginLeft: 8 }}>
-          {[['#00ff88', `Moving: ${metrics.activeCount}`], ['#ffb800', `Charging: ${metrics.chargingCount}`], ['#ff4444', `Error: ${metrics.errorCount}`]].map(([col, lbl]) => (
+          {[['#16a34a', `Moving: ${metrics.activeCount}`], ['#f59e0b', `Charging: ${metrics.chargingCount}`], ['#dc2626', `Error: ${metrics.errorCount}`]].map(([col, lbl]) => (
             <div key={lbl as string} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11 }}>
               <div style={{ width: 7, height: 7, borderRadius: '50%', background: col as string, boxShadow: `0 0 6px ${col}`, animation: 'blink 1.8s infinite' }} />
               {lbl}
@@ -102,27 +115,37 @@ export default function App() {
         </div>
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
           <button onClick={() => openConfig('broker')}
-            style={{ fontFamily: 'Share Tech Mono', fontSize: 9, cursor: 'pointer', color: '#5a7080',
-              border: '1px solid #152030', background: 'transparent', padding: '2px 7px', borderRadius: 2 }}>
+            style={{ fontFamily: 'Roboto Mono', fontSize: 9, cursor: 'pointer', color: '#64748b',
+              border: '1px solid #d4dae3', background: 'transparent', padding: '2px 7px', borderRadius: 2 }}>
             ⚙ CONFIG
           </button>
           <button onClick={toggleLive}
-            style={{ fontFamily: 'Share Tech Mono', fontSize: 9, cursor: 'pointer',
-              color: live ? '#00d4ff' : '#5a7080',
-              border: `1px solid ${live ? 'rgba(0,212,255,0.5)' : '#152030'}`,
-              background: live ? 'rgba(0,212,255,0.1)' : 'transparent',
+            style={{ fontFamily: 'Roboto Mono', fontSize: 9, cursor: 'pointer',
+              color: live ? '#2563eb' : '#64748b',
+              border: `1px solid ${live ? 'rgba(37,99,235,0.5)' : '#d4dae3'}`,
+              background: live ? 'rgba(37,99,235,0.1)' : 'transparent',
               padding: '2px 7px', borderRadius: 2 }}>
             {live ? '● LIVE' : '○ CONNECT'}
           </button>
           <button onClick={toggleSim} disabled={live}
-            style={{ fontFamily: 'Share Tech Mono', fontSize: 9, cursor: live ? 'not-allowed' : 'pointer',
-              color: simOn ? '#00ff88' : '#5a7080', opacity: live ? 0.4 : 1,
-              border: `1px solid ${simOn ? 'rgba(0,255,136,0.4)' : '#152030'}`,
-              background: simOn ? 'rgba(0,255,136,0.08)' : 'transparent',
+            style={{ fontFamily: 'Roboto Mono', fontSize: 9, cursor: live ? 'not-allowed' : 'pointer',
+              color: simOn ? '#16a34a' : '#64748b', opacity: live ? 0.4 : 1,
+              border: `1px solid ${simOn ? 'rgba(22,163,74,0.4)' : '#d4dae3'}`,
+              background: simOn ? 'rgba(22,163,74,0.08)' : 'transparent',
               padding: '2px 7px', borderRadius: 2 }}>
             {simOn ? '● SIM RUNNING' : '○ START SIM'}
           </button>
-          <span style={{ fontFamily: 'Share Tech Mono', fontSize: 9, color: '#00d4ff', border: '1px solid rgba(0,212,255,0.4)', padding: '2px 7px', borderRadius: 2 }}>VDA5050 v2.0</span>
+          <span style={{ fontFamily: 'Roboto Mono', fontSize: 9, color: '#2563eb', border: '1px solid rgba(37,99,235,0.4)', padding: '2px 7px', borderRadius: 2 }}>VDA5050 v2.0</span>
+          <span style={{ width: 1, height: 18, background: '#d4dae3', margin: '0 2px' }} />
+          <span style={{ fontFamily: 'Roboto Mono', fontSize: 9, color: '#4a5568' }} title={authUser?.role}>
+            ◐ {authUser?.realName || authUser?.username || 'user'}
+          </span>
+          <button onClick={() => { if (live) mqttService.disconnect(); simulationService.stop(); clearAuth() }}
+            title="Sign out"
+            style={{ fontFamily: 'Roboto Mono', fontSize: 9, cursor: 'pointer', color: '#dc2626',
+              border: '1px solid rgba(220,38,38,0.35)', background: 'transparent', padding: '2px 7px', borderRadius: 2 }}>
+            ⏻ LOGOUT
+          </button>
         </div>
       </div>
 
@@ -145,7 +168,7 @@ export default function App() {
         />
 
         {/* MAP AREA */}
-        <div style={{ flex: 1, background: '#060a10', position: 'relative', overflow: 'hidden' }}>
+        <div style={{ flex: 1, background: '#eef1f5', position: 'relative', overflow: 'hidden' }}>
           {map ? (
             <MapCanvas
               map={map}
@@ -157,12 +180,12 @@ export default function App() {
               ctrl={ctrl}
             />
           ) : (
-            <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#3a5060', fontFamily: 'Share Tech Mono', fontSize: 11 }}>Loading map...</div>
+            <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#94a3b4', fontFamily: 'Roboto Mono', fontSize: 11 }}>Loading map...</div>
           )}
         </div>
 
         {/* RIGHT PANEL — robot detail when selected, else tabs + metrics */}
-        <div style={{ width: 210, background: '#0a1520', borderLeft: '1px solid #152030', display: 'flex', flexDirection: 'column', overflow: 'hidden', flexShrink: 0 }}>
+        <div style={{ width: 210, background: '#ffffff', borderLeft: '1px solid #d4dae3', display: 'flex', flexDirection: 'column', overflow: 'hidden', flexShrink: 0 }}>
           {selectedRobot ? (
             <RobotDetail
               robot={selectedRobot}
@@ -172,14 +195,14 @@ export default function App() {
           ) : (
             <>
               {/* Tab bar */}
-              <div style={{ display: 'flex', borderBottom: '1px solid #152030', flexShrink: 0 }}>
-                {([['stream', 'STREAM'], ['missions', 'MISSIONS'], ['alarms', 'ALARMS']] as [RightTab, string][]).map(([key, lbl]) => (
+              <div style={{ display: 'flex', borderBottom: '1px solid #d4dae3', flexShrink: 0 }}>
+                {([['stream', 'STREAM'], ['missions', 'JOBS'], ['storage', 'STORAGE'], ['alarms', 'ALARMS']] as [RightTab, string][]).map(([key, lbl]) => (
                   <button key={key} onClick={() => setTab(key)}
-                    style={{ flex: 1, padding: '6px 0', fontSize: 9, letterSpacing: 1, fontWeight: 600, cursor: 'pointer',
-                      fontFamily: 'Rajdhani, sans-serif', background: tab === key ? 'rgba(0,212,255,0.08)' : 'transparent',
-                      color: tab === key ? '#00d4ff' : '#5a7080',
-                      border: 'none', borderBottom: tab === key ? '2px solid #00d4ff' : '2px solid transparent' }}>
-                    {lbl}{key === 'alarms' && activeAlarms > 0 && <span style={{ color: '#ff4444' }}> {activeAlarms}</span>}
+                    style={{ flex: 1, padding: '6px 0', fontSize: 9, letterSpacing: 0.5, fontWeight: 600, cursor: 'pointer',
+                      fontFamily: 'Inter, "Noto Sans JP", sans-serif', background: tab === key ? 'rgba(37,99,235,0.08)' : 'transparent',
+                      color: tab === key ? '#2563eb' : '#64748b',
+                      border: 'none', borderBottom: tab === key ? '2px solid #2563eb' : '2px solid transparent' }}>
+                    {lbl}{key === 'alarms' && activeAlarms > 0 && <span style={{ color: '#dc2626' }}> {activeAlarms}</span>}
                   </button>
                 ))}
               </div>
@@ -188,17 +211,18 @@ export default function App() {
               <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
                 {tab === 'stream' && (
                   <div style={{ padding: '8px 12px', overflowY: 'auto' }}>
-                    <div style={{ fontSize: 9, letterSpacing: 2, color: '#5a7080', textTransform: 'uppercase', marginBottom: 7 }}>VDA5050 Stream</div>
+                    <div style={{ fontSize: 9, letterSpacing: 2, color: '#64748b', textTransform: 'uppercase', marginBottom: 7 }}>VDA5050 Stream</div>
                     <VdaStream entries={mqttLog} />
                   </div>
                 )}
-                {tab === 'missions' && map && <OrderPanel nodes={map.points} />}
+                {tab === 'missions' && <OrderPanel onManageStorage={() => setShowStorageDialog(true)} />}
+                {tab === 'storage' && <StoragePanel onManage={() => setShowStorageDialog(true)} />}
                 {tab === 'alarms' && <AlarmPanel onSelectRobot={setSelectedRobotId} />}
               </div>
 
               {/* Metrics always visible */}
-              <div style={{ borderTop: '1px solid #152030', padding: '8px 12px', flexShrink: 0 }}>
-                <div style={{ fontSize: 9, letterSpacing: 2, color: '#5a7080', textTransform: 'uppercase', marginBottom: 7 }}>Fleet Metrics</div>
+              <div style={{ borderTop: '1px solid #d4dae3', padding: '8px 12px', flexShrink: 0 }}>
+                <div style={{ fontSize: 9, letterSpacing: 2, color: '#64748b', textTransform: 'uppercase', marginBottom: 7 }}>Fleet Metrics</div>
                 <MetricsPanel metrics={metrics} />
               </div>
             </>
@@ -218,6 +242,7 @@ export default function App() {
       />
 
       {showConfig && <ConfigDialog initialTab={configTab} onClose={() => setShowConfig(false)} />}
+      {showStorageDialog && <StorageDialog onClose={() => setShowStorageDialog(false)} />}
     </div>
   )
 }

@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- open / empty carton box (isometric), outline grey -->
+  <!-- open top rim (hollow) -->
+  <path d="M10 22 L32 14 L54 22 L32 30 Z" fill="rgba(124,147,168,0.10)" stroke="#7c93a8" stroke-width="2.5" stroke-linejoin="round"/>
+  <path d="M17 22 L32 16.5 L47 22 L32 27.5 Z" fill="none" stroke="#7c93a8" stroke-width="1.2" opacity="0.55"/>
+  <!-- left face -->
+  <path d="M10 22 L32 30 L32 54 L10 46 Z" fill="rgba(124,147,168,0.08)" stroke="#7c93a8" stroke-width="2.5" stroke-linejoin="round"/>
+  <!-- right face -->
+  <path d="M54 22 L32 30 L32 54 L54 46 Z" fill="rgba(124,147,168,0.04)" stroke="#7c93a8" stroke-width="2.5" stroke-linejoin="round"/>
+  <path d="M32 30 V54" stroke="#7c93a8" stroke-width="1.2" opacity="0.55"/>
+</svg>

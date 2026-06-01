@@ -32,14 +32,14 @@ export const AGV_POSTER_PATH = (model: AgvModel) =>
 
 // ── Status Colors ──
 export const STATUS_COLOR: Record<AgvStatus, string> = {
-  EXECUTING:   '#00ff88',
-  IDLE:        '#5a7080',
-  CHARGING:    '#ffb800',
-  ERROR:       '#ff4444',
-  PAUSE:       '#aaaaaa',
-  TRAFFIC:     '#ff8c00',
-  UNAVAILABLE: '#cc4444',
-  UNKNOWN:     '#444444',
+  EXECUTING:   '#16a34a',
+  IDLE:        '#64748b',
+  CHARGING:    '#f59e0b',
+  ERROR:       '#dc2626',
+  PAUSE:       '#7c8696',
+  TRAFFIC:     '#ea7a00',
+  UNAVAILABLE: '#b91c1c',
+  UNKNOWN:     '#334155',
 }
 
 export const STATUS_LABEL: Record<AgvStatus, string> = {
@@ -62,9 +62,10 @@ export const DEFAULT_MAP_CONFIG = {
   showEdges: true,
   showPaths: true,
   showTheta: false,
-  nodeSize: 3,
-  labelSize: 9,
-  labelZoomThreshold: 2.0,
+  showStorage: true,
+  nodeSize: 4,
+  labelSize: 11,
+  labelZoomThreshold: 1.5,
   robotSize: 2.0,            // metres (true-to-scale footprint length)
   selectedModel: 'AM15' as AgvModel,
 }

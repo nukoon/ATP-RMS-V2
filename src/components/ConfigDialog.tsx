@@ -3,15 +3,16 @@
  * Tabs: AMRs (register robot: model + serial + IP), Maps (upload/select),
  * Broker (WebSocket URL + auth). Persists via config.store.
  */
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { AgvModel } from '@/types'
 import type { AmrConfig } from '@/types/fleet'
 import { useConfigStore } from '@/store/config.store'
+import { ApiError } from '@/services/api'
 import { AGV_SPECS } from '@/constants/agv-specs'
 import { AGV_MODELS } from '@/constants'
 
 type Tab = 'amrs' | 'maps' | 'broker'
-const COLORS = ['#00d4ff', '#00ff88', '#ffb800', '#ff6b6b', '#a78bfa', '#ff8c00', '#08d26e', '#c90bfe']
+const COLORS = ['#2563eb', '#16a34a', '#f59e0b', '#dc2626', '#7c3aed', '#ea7a00', '#0891b2', '#db2777']
 
 export function ConfigDialog({ onClose, initialTab = 'amrs' }: { onClose: () => void; initialTab?: Tab }) {
   const [tab, setTab] = useState<Tab>(initialTab)
@@ -19,19 +20,19 @@ export function ConfigDialog({ onClose, initialTab = 'amrs' }: { onClose: () => 
     <div onClick={onClose}
       style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
       <div onClick={e => e.stopPropagation()}
-        style={{ width: 560, maxHeight: '82vh', background: '#0a1520', border: '1px solid #152030', borderRadius: 4, display: 'flex', flexDirection: 'column', overflow: 'hidden', fontFamily: 'Rajdhani, sans-serif', color: '#c8d8e8' }}>
+        style={{ width: 560, maxHeight: '82vh', background: '#ffffff', border: '1px solid #d4dae3', borderRadius: 4, display: 'flex', flexDirection: 'column', overflow: 'hidden', fontFamily: 'Inter, "Noto Sans JP", sans-serif', color: '#1a2230' }}>
         {/* header */}
-        <div style={{ display: 'flex', alignItems: 'center', padding: '10px 14px', borderBottom: '1px solid #152030' }}>
-          <span style={{ fontFamily: 'Share Tech Mono', fontSize: 11, letterSpacing: 2, color: '#00d4ff' }}>FLEET CONFIGURATION</span>
-          <button onClick={onClose} style={{ marginLeft: 'auto', background: 'transparent', border: 'none', color: '#5a7080', cursor: 'pointer', fontSize: 18, lineHeight: 1 }}>×</button>
+        <div style={{ display: 'flex', alignItems: 'center', padding: '10px 14px', borderBottom: '1px solid #d4dae3' }}>
+          <span style={{ fontFamily: 'Roboto Mono', fontSize: 11, letterSpacing: 2, color: '#2563eb' }}>FLEET CONFIGURATION</span>
+          <button onClick={onClose} style={{ marginLeft: 'auto', background: 'transparent', border: 'none', color: '#64748b', cursor: 'pointer', fontSize: 18, lineHeight: 1 }}>×</button>
         </div>
         {/* tabs */}
-        <div style={{ display: 'flex', borderBottom: '1px solid #152030', flexShrink: 0 }}>
+        <div style={{ display: 'flex', borderBottom: '1px solid #d4dae3', flexShrink: 0 }}>
           {([['amrs', 'AMRs'], ['maps', 'MAPS'], ['broker', 'BROKER']] as [Tab, string][]).map(([k, l]) => (
             <button key={k} onClick={() => setTab(k)}
-              style={{ flex: 1, padding: '8px 0', fontSize: 10, fontWeight: 600, letterSpacing: 1, cursor: 'pointer', fontFamily: 'Rajdhani, sans-serif',
-                background: tab === k ? 'rgba(0,212,255,0.08)' : 'transparent', color: tab === k ? '#00d4ff' : '#5a7080',
-                border: 'none', borderBottom: tab === k ? '2px solid #00d4ff' : '2px solid transparent' }}>{l}</button>
+              style={{ flex: 1, padding: '8px 0', fontSize: 10, fontWeight: 600, letterSpacing: 1, cursor: 'pointer', fontFamily: 'Inter, "Noto Sans JP", sans-serif',
+                background: tab === k ? 'rgba(37,99,235,0.08)' : 'transparent', color: tab === k ? '#2563eb' : '#64748b',
+                border: 'none', borderBottom: tab === k ? '2px solid #2563eb' : '2px solid transparent' }}>{l}</button>
           ))}
         </div>
         <div style={{ overflowY: 'auto', padding: 14 }}>
@@ -46,34 +47,50 @@ export function ConfigDialog({ onClose, initialTab = 'amrs' }: { onClose: () => 
 
 // ── shared field styles ────────────────────────────────────
 const inputStyle: React.CSSProperties = {
-  background: '#0c1a28', color: '#c8d8e8', border: '1px solid #152030', borderRadius: 2,
-  padding: '5px 7px', fontSize: 11, fontFamily: 'Share Tech Mono', width: '100%',
+  background: '#f3f6fa', color: '#1a2230', border: '1px solid #d4dae3', borderRadius: 2,
+  padding: '5px 7px', fontSize: 11, fontFamily: 'Roboto Mono', width: '100%',
 }
 const Label = ({ children }: { children: React.ReactNode }) => (
-  <div style={{ fontSize: 9, letterSpacing: 1, color: '#5a7080', textTransform: 'uppercase', marginBottom: 3 }}>{children}</div>
+  <div style={{ fontSize: 9, letterSpacing: 1, color: '#64748b', textTransform: 'uppercase', marginBottom: 3 }}>{children}</div>
 )
 const primaryBtn: React.CSSProperties = {
   padding: '6px 14px', fontSize: 11, fontWeight: 600, letterSpacing: 1, borderRadius: 2, cursor: 'pointer',
-  color: '#00ff88', border: '1px solid rgba(0,255,136,0.4)', background: 'rgba(0,255,136,0.08)',
+  color: '#16a34a', border: '1px solid rgba(22,163,74,0.4)', background: 'rgba(22,163,74,0.08)',
 }
 
 // ── AMRs tab ───────────────────────────────────────────────
 function AmrTab() {
-  const { amrs, addAmr, removeAmr, updateAmr } = useConfigStore()
+  const { amrs, amrsLoaded, loadAmrs, addAmr, removeAmr, updateAmr } = useConfigStore()
   const [serial, setSerial] = useState('')
   const [name, setName]     = useState('')
   const [model, setModel]   = useState<AgvModel>('AM15')
   const [ip, setIp]         = useState('')
   const [color, setColor]   = useState(COLORS[0])
+  const [busy, setBusy]     = useState(false)
+  const [err, setErr]       = useState('')
 
-  const canAdd = serial.trim() && !amrs.some(a => a.serial === serial.trim())
+  // Pull the live list from the DB the first time the tab is shown.
+  useEffect(() => {
+    if (!amrsLoaded) loadAmrs().catch(e => setErr(e instanceof ApiError ? e.message : 'failed to load AMRs'))
+  }, [amrsLoaded, loadAmrs])
 
-  const add = () => {
+  const canAdd = !!serial.trim() && !amrs.some(a => a.serial === serial.trim()) && !busy
+
+  const add = async () => {
     if (!canAdd) return
+    setErr(''); setBusy(true)
     const a: AmrConfig = { serial: serial.trim(), name: name.trim() || serial.trim(), model, ip: ip.trim(), color, enabled: true }
-    addAmr(a)
-    setSerial(''); setName(''); setIp('')
+    try {
+      await addAmr(a)
+      setSerial(''); setName(''); setIp('')
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.message : 'failed to add AMR')
+    } finally {
+      setBusy(false)
+    }
   }
+
+  const onErr = (e: unknown) => setErr(e instanceof ApiError ? e.message : 'request failed')
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -95,27 +112,29 @@ function AmrTab() {
           {COLORS.map(c => (
             <button key={c} onClick={() => setColor(c)}
               style={{ width: 20, height: 20, borderRadius: '50%', background: c, cursor: 'pointer',
-                border: color === c ? '2px solid #fff' : '2px solid transparent' }} />
+                border: color === c ? '2px solid #1a2230' : '2px solid #d4dae3' }} />
           ))}
         </div>
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-        <button style={{ ...primaryBtn, opacity: canAdd ? 1 : 0.4, cursor: canAdd ? 'pointer' : 'not-allowed' }} onClick={add}>+ ADD AMR</button>
-        <span style={{ fontSize: 9, color: '#5a7080' }}>Topic: uagv/v2/&lt;mfr&gt;/<b style={{ color: '#00d4ff' }}>{serial || 'serial'}</b>/state</span>
+        <button style={{ ...primaryBtn, opacity: canAdd ? 1 : 0.4, cursor: canAdd ? 'pointer' : 'not-allowed' }} onClick={add}>{busy ? '… SAVING' : '+ ADD AMR'}</button>
+        <span style={{ fontSize: 9, color: '#64748b' }}>Topic: uagv/v2/&lt;mfr&gt;/<b style={{ color: '#2563eb' }}>{serial || 'serial'}</b>/state</span>
       </div>
+      {err && <div style={{ fontSize: 10, color: '#dc2626', background: 'rgba(220,38,38,0.08)', border: '1px solid rgba(220,38,38,0.25)', borderRadius: 3, padding: '5px 8px' }}>{err}</div>}
 
       {/* list */}
-      <div style={{ borderTop: '1px solid #152030', paddingTop: 8 }}>
-        <Label>Registered AMRs ({amrs.length})</Label>
-        {amrs.length === 0 && <div style={{ fontSize: 10, color: '#3a5060', padding: '6px 0' }}>None yet — add a robot above to connect to it.</div>}
+      <div style={{ borderTop: '1px solid #d4dae3', paddingTop: 8 }}>
+        <Label>Registered AMRs ({amrs.length}) · stored in DB</Label>
+        {!amrsLoaded && <div style={{ fontSize: 10, color: '#94a3b4', padding: '6px 0' }}>Loading…</div>}
+        {amrsLoaded && amrs.length === 0 && <div style={{ fontSize: 10, color: '#94a3b4', padding: '6px 0' }}>None yet — add a robot above to connect to it.</div>}
         {amrs.map(a => (
-          <div key={a.serial} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 0', borderBottom: '1px solid rgba(21,32,48,0.5)', fontSize: 11 }}>
-            <input type="checkbox" checked={a.enabled} onChange={e => updateAmr(a.serial, { enabled: e.target.checked })} style={{ accentColor: '#00d4ff' }} />
+          <div key={a.serial} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 0', borderBottom: '1px solid rgba(212,218,227,0.5)', fontSize: 11 }}>
+            <input type="checkbox" checked={a.enabled} onChange={e => { updateAmr(a.serial, { enabled: e.target.checked }).catch(onErr) }} style={{ accentColor: '#2563eb' }} />
             <span style={{ width: 8, height: 8, borderRadius: '50%', background: a.color }} />
-            <span style={{ fontFamily: 'Share Tech Mono', color: '#00d4ff', width: 80 }}>{a.serial}</span>
-            <span style={{ color: '#5a7080', width: 54 }}>{a.model}</span>
-            <span style={{ fontFamily: 'Share Tech Mono', color: '#8a9aaa', flex: 1 }}>{a.ip || '—'}</span>
-            <button onClick={() => removeAmr(a.serial)} style={{ background: 'transparent', border: 'none', color: '#ff4444', cursor: 'pointer', fontSize: 14 }}>×</button>
+            <span style={{ fontFamily: 'Roboto Mono', color: '#2563eb', width: 80 }}>{a.serial}</span>
+            <span style={{ color: '#64748b', width: 54 }}>{a.model}</span>
+            <span style={{ fontFamily: 'Roboto Mono', color: '#4a5568', flex: 1 }}>{a.ip || '—'}</span>
+            <button onClick={() => { removeAmr(a.serial).catch(onErr) }} style={{ background: 'transparent', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: 14 }}>×</button>
           </div>
         ))}
       </div>
@@ -151,19 +170,19 @@ function MapTab() {
           <input type="file" accept=".json,application/json" style={{ display: 'none' }}
             onChange={e => { const f = e.target.files?.[0]; if (f) onFile(f) }} />
         </label>
-        {err && <span style={{ marginLeft: 10, fontSize: 10, color: '#ff4444' }}>{err}</span>}
+        {err && <span style={{ marginLeft: 10, fontSize: 10, color: '#dc2626' }}>{err}</span>}
       </div>
-      <div style={{ borderTop: '1px solid #152030', paddingTop: 8 }}>
+      <div style={{ borderTop: '1px solid #d4dae3', paddingTop: 8 }}>
         <Label>Maps ({maps.length})</Label>
         {maps.map(m => (
-          <div key={m.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 0', borderBottom: '1px solid rgba(21,32,48,0.5)', fontSize: 11 }}>
-            <input type="radio" checked={activeMapId === m.id} onChange={() => setActiveMap(m.id)} style={{ accentColor: '#00d4ff' }} />
-            <span style={{ flex: 1, color: activeMapId === m.id ? '#00d4ff' : '#c8d8e8' }}>{m.name}</span>
-            <span style={{ fontSize: 9, color: '#5a7080' }}>{m.source}</span>
-            {m.source !== 'builtin' && <button onClick={() => removeMap(m.id)} style={{ background: 'transparent', border: 'none', color: '#ff4444', cursor: 'pointer', fontSize: 14 }}>×</button>}
+          <div key={m.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 0', borderBottom: '1px solid rgba(212,218,227,0.5)', fontSize: 11 }}>
+            <input type="radio" checked={activeMapId === m.id} onChange={() => setActiveMap(m.id)} style={{ accentColor: '#2563eb' }} />
+            <span style={{ flex: 1, color: activeMapId === m.id ? '#2563eb' : '#1a2230' }}>{m.name}</span>
+            <span style={{ fontSize: 9, color: '#64748b' }}>{m.source}</span>
+            {m.source !== 'builtin' && <button onClick={() => removeMap(m.id)} style={{ background: 'transparent', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: 14 }}>×</button>}
           </div>
         ))}
-        <div style={{ fontSize: 9, color: '#5a7080', marginTop: 6 }}>Selecting a map reloads the canvas with it.</div>
+        <div style={{ fontSize: 9, color: '#64748b', marginTop: 6 }}>Selecting a map reloads the canvas with it.</div>
       </div>
     </div>
   )
@@ -181,10 +200,10 @@ function BrokerTab() {
       </div>
       <div><Label>VDA5050 Manufacturer</Label><input style={inputStyle} value={broker.manufacturer} onChange={e => setBroker({ manufacturer: e.target.value })} placeholder="ATP" /></div>
 
-      <div style={{ marginTop: 4, padding: 10, background: 'rgba(255,184,0,0.06)', border: '1px solid rgba(255,184,0,0.25)', borderRadius: 3, fontSize: 10, color: '#c9b890', lineHeight: 1.5 }}>
-        <b style={{ color: '#ffb800' }}>⚠ Real robots speak TCP 1883.</b> Browsers can only do MQTT over WebSocket,
+      <div style={{ marginTop: 4, padding: 10, background: 'rgba(245,158,11,0.06)', border: '1px solid rgba(245,158,11,0.25)', borderRadius: 3, fontSize: 10, color: '#c9b890', lineHeight: 1.5 }}>
+        <b style={{ color: '#f59e0b' }}>⚠ Real robots speak TCP 1883.</b> Browsers can only do MQTT over WebSocket,
         so point this at a Mosquitto bridge:
-        <pre style={{ margin: '6px 0 0', fontFamily: 'Share Tech Mono', fontSize: 9, color: '#8a9aaa' }}>{`listener 1883            # AGV publishes here
+        <pre style={{ margin: '6px 0 0', fontFamily: 'Roboto Mono', fontSize: 9, color: '#4a5568' }}>{`listener 1883            # AGV publishes here
 listener 9001
 protocol websockets      # browser connects here`}</pre>
       </div>

@@ -26,6 +26,7 @@ export interface MapCurve {
   sx: number; sy: number
   ex: number; ey: number
   cp: { x: number; y: number }[]
+  reverse: boolean               // ATP "车身方向": true = drive this segment in REVERSE
 }
 
 export interface MapArea {
@@ -140,6 +141,58 @@ export interface FleetOrder {
   finishedAt: string | null
 }
 
+// ── VDA5050 Order (outbound) ───────────────────────────────
+export type VDA5050BlockingType = 'NONE' | 'SOFT' | 'HARD'
+
+export interface VDA5050ActionParameter {
+  key: string
+  value: unknown
+}
+
+export interface VDA5050Action {
+  actionType: string
+  actionId: string
+  blockingType: VDA5050BlockingType
+  actionDescription?: string
+  actionParameters?: VDA5050ActionParameter[]
+}
+
+export interface VDA5050NodePosition {
+  x: number
+  y: number
+  theta?: number
+  mapId: string
+}
+
+export interface VDA5050Node {
+  nodeId: string
+  sequenceId: number
+  released: boolean
+  nodePosition?: VDA5050NodePosition
+  actions: VDA5050Action[]
+}
+
+export interface VDA5050Edge {
+  edgeId: string
+  sequenceId: number
+  released: boolean
+  startNodeId: string
+  endNodeId: string
+  actions: VDA5050Action[]
+}
+
+export interface VDA5050Order {
+  headerId: number
+  timestamp: string
+  version: string
+  manufacturer: string
+  serialNumber: string
+  orderId: string
+  orderUpdateId: number
+  nodes: VDA5050Node[]
+  edges: VDA5050Edge[]
+}
+
 // ── MQTT Log ───────────────────────────────────────────────
 export type VDA5050Topic = 'state' | 'visualization' | 'order' | 'connection' | 'factsheet'
 
@@ -160,6 +213,7 @@ export interface MapViewConfig {
   showEdges: boolean
   showPaths: boolean
   showTheta: boolean
+  showStorage: boolean
   nodeSize: number             // px
   labelSize: number            // px
   labelZoomThreshold: number   // show labels when zoom >= this

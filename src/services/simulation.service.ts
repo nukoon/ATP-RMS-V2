@@ -11,11 +11,15 @@
  */
 import type { FleetMap, MapPoint, MapCurve, AgvModel, AgvStatus, VDA5050State, VDA5050Error } from '@/types'
 import { useFleetStore } from '@/store/fleet.store'
+import { useStorageStore } from '@/store/storage.store'
 import { calcTheta } from '@/utils/canvas'
 import { speedMaxOf } from '@/constants/agv-specs'
 import { FLEET_ROSTER } from '@/constants/fleet-roster'
+import type { MissionAction } from '@/types/fleet'
 
-type Phase = 'PARKED' | 'TO_TARGET' | 'TO_HOME'
+// PARKED → (mission) TO_PICKUP → AT_PICKUP (run PICK actions) → TO_DROPOFF →
+// AT_DROPOFF (run DROP actions) → TO_HOME → PARKED
+type Phase = 'PARKED' | 'TO_PICKUP' | 'AT_PICKUP' | 'TO_DROPOFF' | 'AT_DROPOFF' | 'TO_HOME'
 
 interface SimBot {
   id: string
@@ -28,6 +32,13 @@ interface SimBot {
   t: number                // 0..1 along current edge
   phase: Phase
   missionId: string | null
+  // storage transport
+  pickupNode: string
+  dropoffNode: string
+  pickupStorageId: string | null
+  dropoffStorageId: string | null
+  actions: MissionAction[] // resolved PICK/DROP plan (snapshot)
+  dwellUntil: number       // while AT_PICKUP/AT_DROPOFF: run actions until this ms
   battery: number
   status: AgvStatus
   paused: boolean
@@ -38,6 +49,8 @@ interface SimBot {
   theta: number
   lastLog: number
 }
+
+const ACTION_DWELL_MS = 2500   // time spent running PICK/DROP actions at a station
 
 const TICK_MS = 100
 const LOW_BATTERY = 20
@@ -57,6 +70,38 @@ function pointOnCurve(c: MapCurve, t: number): { x: number; y: number } {
     return { x: u*u*c.sx + 2*u*t*c.cp[0].x + t*t*c.ex, y: u*u*c.sy + 2*u*t*c.cp[0].y + t*t*c.ey }
   }
   return { x: c.sx + (c.ex - c.sx) * t, y: c.sy + (c.ey - c.sy) * t }
+}
+
+/**
+ * Tangent heading (deg) of a curve at parameter t, using a fixed-width
+ * sampling window so it never collapses to a zero-length vector at the
+ * endpoints (which would snap the heading to 0° / East). Returns null when
+ * the segment is degenerate, so callers keep the previous heading.
+ */
+function curveHeading(c: MapCurve, t: number): number | null {
+  const ahead  = Math.min(1, t + 0.06)
+  const behind = Math.max(0, ahead - 0.06)
+  const pa = pointOnCurve(c, ahead)
+  const pb = pointOnCurve(c, behind)
+  const dx = pa.x - pb.x, dy = pa.y - pb.y
+  if (dx * dx + dy * dy < 1e-6) return null
+  return calcTheta(dx, dy)
+}
+
+/** Ease `cur` toward `target` along the shortest arc (degrees). */
+function smoothAngleDeg(cur: number, target: number, f: number): number {
+  const d = ((target - cur + 540) % 360) - 180
+  return cur + d * f
+}
+
+/**
+ * Body heading (deg) on edge `e` at param `t`. On REVERSE segments the robot
+ * drives backwards, so its body faces 180° from the direction of travel — the
+ * robot keeps its nose pointed the same way and backs along the path.
+ */
+function bodyFacing(e: MapCurve, t: number): number | null {
+  const h = curveHeading(e, t)
+  return h === null ? null : (e.reverse ? (h + 180) % 360 : h)
 }
 
 function curveLength(c: MapCurve): number {
@@ -119,6 +164,23 @@ export class SimulationService {
 
   nodeById(id: string): MapPoint | undefined { return this.nodes.get(id) }
 
+  /**
+   * Heading (deg) for a robot parked at `nodeId`. Charge-node theta in the
+   * ATP map is a sentinel (999), so we align to the connecting lane via
+   * `bodyFacing` (which respects REVERSE segments). Prefer the incoming
+   * edge (the body heading on arrival), else an outgoing edge at its start,
+   * else a sane map theta, else North.
+   */
+  private parkHeading(nodeId: string): number {
+    for (const list of this.adj.values())
+      for (const e of list)
+        if (e.eNode === nodeId) { const h = bodyFacing(e, 1); if (h !== null) return h }
+    const out = this.adj.get(nodeId)
+    if (out && out.length) { const h = bodyFacing(out[0], 0); if (h !== null) return h }
+    const t = this.nodeById(nodeId)?.theta
+    return (t != null && Math.abs(t) <= 360) ? t : 90
+  }
+
   // ── lifecycle ────────────────────────────────────────────
   start(map: FleetMap) {
     if (this.timer) return
@@ -137,9 +199,11 @@ export class SimulationService {
         id: f.id, model: f.model, mps: speedMaxOf(f.model),
         homeNode: home.id, node: home.id,
         route: [], edge: null, t: 0, phase: 'PARKED', missionId: null,
+        pickupNode: '', dropoffNode: '', pickupStorageId: null, dropoffStorageId: null,
+        actions: [], dwellUntil: 0,
         battery: 70 + Math.random() * 30, status: 'IDLE',
         paused: false, fault: null, lowBatt: false, yielding: false,
-        pos: { x: home.x, y: home.y }, theta: home.theta ?? 0, lastLog: 0,
+        pos: { x: home.x, y: home.y }, theta: this.parkHeading(home.id), lastLog: 0,
       }
       store.upsertRobot({
         id: f.id, model: f.model, status: 'IDLE',
@@ -175,19 +239,21 @@ export class SimulationService {
     }
   }
 
-  // ── dispatch: nearest free bot by path distance ──────────
+  // ── dispatch: nearest free bot by route to the PICKUP node ──
   private dispatch(store: ReturnType<typeof useFleetStore.getState>) {
     const pending = store.missions.filter(m => m.status === 'PENDING')
     for (const m of pending) {
-      const target = this.nodeById(m.endNode)
-      if (!target) { store.updateMission(m.id, { status: 'FAILED' }); continue }
+      // pickup = startNode, dropoff = endNode (both resolved from storages)
+      const pickup = this.nodeById(m.startNode)
+      const dropoff = this.nodeById(m.endNode)
+      if (!pickup || !dropoff) { store.updateMission(m.id, { status: 'FAILED' }); continue }
       const free = this.bots.filter(b => b.phase === 'PARKED' && !b.missionId && !b.fault && b.battery > LOW_BATTERY)
       if (!free.length) return  // all busy → leave PENDING for later
 
-      // choose the bot with the cheapest route to the target
+      // choose the bot with the cheapest route to the pickup
       let pick: { b: SimBot; path: MapCurve[]; cost: number } | null = null
       for (const b of free) {
-        const path = this.shortestPath(b.node, m.endNode)
+        const path = this.shortestPath(b.node, m.startNode)
         if (!path) continue
         const cost = this.pathCost(path)
         if (!pick || cost < pick.cost) pick = { b, path, cost }
@@ -198,10 +264,18 @@ export class SimulationService {
       b.route = path
       b.edge = path[0] ?? null
       b.t = 0
-      b.phase = 'TO_TARGET'
+      b.phase = 'TO_PICKUP'
       b.missionId = m.id
+      b.pickupNode = m.startNode
+      b.dropoffNode = m.endNode
+      b.pickupStorageId = m.pickupStorageId ?? null
+      b.dropoffStorageId = m.dropoffStorageId ?? null
+      b.actions = m.actions ?? []
       b.status = 'EXECUTING'
-      store.updateMission(m.id, { status: 'EXECUTING', agvId: b.id, assignedAt: new Date().toISOString(), startedAt: new Date().toISOString() })
+      const ts = new Date().toISOString()
+      store.updateMission(m.id, { status: 'EXECUTING', agvId: b.id, assignedAt: ts, startedAt: ts })
+      // if the pickup is where the bot already sits, arrive immediately next tick
+      if (!b.edge) this.onArrive(store, b)
     }
   }
 
@@ -225,8 +299,9 @@ export class SimulationService {
     }
   }
   private priority(b: SimBot): number {
-    // bots heading to a job outrank bots returning home; tiebreak stable by index
-    const base = b.phase === 'TO_TARGET' ? 1000 : 500
+    // bots running a job (to pickup/dropoff) outrank bots returning home
+    const onJob = b.phase === 'TO_PICKUP' || b.phase === 'TO_DROPOFF'
+    const base = onJob ? 1000 : 500
     return base - this.bots.indexOf(b)
   }
 
@@ -252,6 +327,14 @@ export class SimulationService {
         continue
       }
 
+      // running PICK/DROP actions at a station: dwell, then move to next leg
+      if (b.phase === 'AT_PICKUP' || b.phase === 'AT_DROPOFF') {
+        b.status = 'EXECUTING'
+        if (now >= b.dwellUntil) this.afterDwell(store, b)
+        this.report(store, b, now)
+        continue
+      }
+
       if (b.yielding) { b.status = 'TRAFFIC'; this.report(store, b, now); continue }
       if (b.status === 'TRAFFIC') b.status = 'EXECUTING'
 
@@ -260,8 +343,11 @@ export class SimulationService {
         const len = this.edgeLen.get(b.edge.id) ?? 1
         b.t += (b.mps * (TICK_MS / 1000)) / len
         const p = pointOnCurve(b.edge, Math.min(1, b.t))
-        const look = pointOnCurve(b.edge, Math.min(1, b.t + 0.05))
-        b.theta = calcTheta(look.x - p.x, look.y - p.y)
+        const target = bodyFacing(b.edge, b.t)
+        // Ease toward the body heading so turns are smooth, the heading never
+        // snaps to East at edge ends (degenerate window → keep current), and
+        // REVERSE segments are driven backwards (nose stays put).
+        if (target !== null) b.theta = smoothAngleDeg(b.theta, target, 0.3)
         b.battery = Math.max(2, b.battery - 0.02)
         b.pos = p
 
@@ -290,16 +376,50 @@ export class SimulationService {
 
   /** Reached the end of a route. */
   private onArrive(store: ReturnType<typeof useFleetStore.getState>, b: SimBot) {
-    if (b.phase === 'TO_TARGET') {
-      if (b.missionId) { store.updateMission(b.missionId, { status: 'FINISHED', progress: 100, finishedAt: new Date().toISOString() }); store.recordOrderCompleted() }
-      b.missionId = null
-      this.sendHome(b)
+    const now = Date.now()
+    if (b.phase === 'TO_PICKUP') {
+      // arrived at pickup → run PICK actions (dwell), then head to dropoff
+      b.phase = 'AT_PICKUP'
+      b.dwellUntil = now + ACTION_DWELL_MS
+      this.runStageActions(store, b, 'PICK')
+    } else if (b.phase === 'TO_DROPOFF') {
+      // arrived at dropoff → run DROP actions (dwell), finish handled afterDwell
+      b.phase = 'AT_DROPOFF'
+      b.dwellUntil = now + ACTION_DWELL_MS
+      this.runStageActions(store, b, 'DROP')
     } else { // TO_HOME or stray
       b.phase = 'PARKED'
       b.status = b.battery < 99 ? 'CHARGING' : 'IDLE'
       const home = this.nodeById(b.homeNode)
-      if (home) { b.pos = { x: home.x, y: home.y }; b.node = home.id }
+      if (home) { b.pos = { x: home.x, y: home.y }; b.node = home.id; b.theta = this.parkHeading(home.id) }
     }
+  }
+
+  /** Dwell finished at a station → advance to the next leg of the mission. */
+  private afterDwell(store: ReturnType<typeof useFleetStore.getState>, b: SimBot) {
+    if (b.phase === 'AT_PICKUP') {
+      // load picked up → route pickup → dropoff
+      const path = this.shortestPath(b.node, b.dropoffNode)
+      if (path) { b.route = path; b.edge = path[0] ?? null; b.t = 0; b.phase = 'TO_DROPOFF'; b.status = 'EXECUTING'; if (!b.edge) this.onArrive(store, b) }
+      else { if (b.missionId) store.updateMission(b.missionId, { status: 'FAILED' }); b.missionId = null; this.sendHome(b) }
+    } else if (b.phase === 'AT_DROPOFF') {
+      // delivery complete → flip storage states, finish mission, go home
+      if (b.pickupStorageId)  useStorageStore.getState().setState(b.pickupStorageId, 'EMPTY').catch(() => {})
+      if (b.dropoffStorageId) useStorageStore.getState().setState(b.dropoffStorageId, 'FULL').catch(() => {})
+      if (b.missionId) { store.updateMission(b.missionId, { status: 'FINISHED', progress: 100, finishedAt: new Date().toISOString() }); store.recordOrderCompleted() }
+      b.missionId = null; b.actions = []; b.pickupStorageId = null; b.dropoffStorageId = null
+      this.sendHome(b)
+    }
+  }
+
+  /** Emit the PICK/DROP VDA5050 actions for a bot to the MQTT stream log. */
+  private runStageActions(store: ReturnType<typeof useFleetStore.getState>, b: SimBot, stage: 'PICK' | 'DROP') {
+    const acts = b.actions.filter(a => a.stage === stage)
+    if (!acts.length) return
+    store.pushMqttLog({
+      id: uid(), robotId: b.id, topic: 'order', timestamp: new Date().toISOString(),
+      payload: { node: stage === 'PICK' ? b.pickupNode : b.dropoffNode, actions: acts.map(a => ({ actionType: a.actionType, blockingType: a.blockingType, params: a.params })) },
+    })
   }
 
   private raiseFault(store: ReturnType<typeof useFleetStore.getState>, b: SimBot, now: number) {
@@ -321,12 +441,15 @@ export class SimulationService {
   }
 
   private report(store: ReturnType<typeof useFleetStore.getState>, b: SimBot, now: number) {
-    // live mission progress = edges done / total (best-effort)
-    if (b.missionId && b.phase === 'TO_TARGET') {
-      const remaining = b.route.length
-      const total = remaining + 1
-      const pct = Math.max(1, Math.min(99, Math.round((1 - remaining / Math.max(total, 1)) * 100)))
-      store.updateMission(b.missionId, { progress: pct })
+    // live mission progress across the pickup→dropoff legs (best-effort)
+    if (b.missionId) {
+      const legPct = () => { const rem = b.route.length, tot = rem + 1; return 1 - rem / Math.max(tot, 1) }
+      let pct = 0
+      if (b.phase === 'TO_PICKUP')       pct = 5 + legPct() * 40       // 5..45
+      else if (b.phase === 'AT_PICKUP')  pct = 50
+      else if (b.phase === 'TO_DROPOFF') pct = 50 + legPct() * 45      // 50..95
+      else if (b.phase === 'AT_DROPOFF') pct = 98
+      if (pct) store.updateMission(b.missionId, { progress: Math.max(1, Math.min(99, Math.round(pct))) })
     }
 
     const state: VDA5050State = {
