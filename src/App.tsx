@@ -9,6 +9,7 @@ import { simulationService } from '@/services/simulation.service'
 import { RobotList }    from '@/components/sidebar/RobotList'
 import { VdaStream }    from '@/components/panels/VdaStream'
 import { MetricsPanel } from '@/components/panels/MetricsPanel'
+import { RobotDetail }  from '@/components/panels/RobotDetail'
 import { MapToolbar }   from '@/components/map/MapToolbar'
 import { MapCanvas }    from '@/components/map/MapCanvas'
 import { useMapTransform } from '@/hooks/useMapTransform'
@@ -31,6 +32,7 @@ export default function App() {
   useEffect(() => () => simulationService.stop(), [])
 
   const robotList = [...robots.values()]
+  const selectedRobot = selectedRobotId ? robots.get(selectedRobotId) ?? null : null
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: '#060a10', color: '#c8d8e8', fontFamily: 'Rajdhani, sans-serif' }}>
@@ -93,16 +95,26 @@ export default function App() {
           )}
         </div>
 
-        {/* RIGHT PANEL */}
-        <div style={{ width: 190, background: '#0a1520', borderLeft: '1px solid #152030', display: 'flex', flexDirection: 'column', overflow: 'hidden', flexShrink: 0 }}>
-          <div style={{ borderBottom: '1px solid #152030', padding: '8px 12px' }}>
-            <div style={{ fontSize: 9, letterSpacing: 2, color: '#5a7080', textTransform: 'uppercase', marginBottom: 7 }}>VDA5050 Stream</div>
-            <VdaStream entries={mqttLog} />
-          </div>
-          <div style={{ borderBottom: '1px solid #152030', padding: '8px 12px' }}>
-            <div style={{ fontSize: 9, letterSpacing: 2, color: '#5a7080', textTransform: 'uppercase', marginBottom: 7 }}>Fleet Metrics</div>
-            <MetricsPanel metrics={metrics} />
-          </div>
+        {/* RIGHT PANEL — robot detail when selected, else stream + metrics */}
+        <div style={{ width: 210, background: '#0a1520', borderLeft: '1px solid #152030', display: 'flex', flexDirection: 'column', overflow: 'hidden', flexShrink: 0 }}>
+          {selectedRobot ? (
+            <RobotDetail
+              robot={selectedRobot}
+              onClose={() => setSelectedRobotId(null)}
+              onAction={(a) => simulationService.command(selectedRobot.id, a)}
+            />
+          ) : (
+            <>
+              <div style={{ borderBottom: '1px solid #152030', padding: '8px 12px' }}>
+                <div style={{ fontSize: 9, letterSpacing: 2, color: '#5a7080', textTransform: 'uppercase', marginBottom: 7 }}>VDA5050 Stream</div>
+                <VdaStream entries={mqttLog} />
+              </div>
+              <div style={{ borderBottom: '1px solid #152030', padding: '8px 12px' }}>
+                <div style={{ fontSize: 9, letterSpacing: 2, color: '#5a7080', textTransform: 'uppercase', marginBottom: 7 }}>Fleet Metrics</div>
+                <MetricsPanel metrics={metrics} />
+              </div>
+            </>
+          )}
         </div>
       </div>
 

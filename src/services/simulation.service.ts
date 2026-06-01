@@ -19,6 +19,7 @@ interface SimBot {
   mps: number          // this model's real top speed (m/s)
   battery: number
   status: AgvStatus
+  paused: boolean      // operator paused via quick action
   lastLog: number      // ms timestamp of last VDA stream entry
 }
 
@@ -106,6 +107,7 @@ export class SimulationService {
         speed: (mps * (TICK_MS / 1000)) / curveLength(curve),
         battery: 60 + Math.random() * 40,
         status: 'EXECUTING',
+        paused: false,
         lastLog: 0,
       }
       store.upsertRobot({
@@ -132,10 +134,24 @@ export class SimulationService {
     useFleetStore.getState().setMqttConnected(false)
   }
 
+  /** Operator quick action from the Robot Detail panel. */
+  command(robotId: string, action: 'PAUSE' | 'RESUME' | 'CANCEL') {
+    const b = this.bots.find(x => x.id === robotId)
+    if (!b) return
+    if (action === 'PAUSE')  { b.paused = true;  b.status = 'PAUSE' }
+    if (action === 'RESUME') { b.paused = false; b.status = 'EXECUTING' }
+    if (action === 'CANCEL') { b.paused = false; b.status = 'IDLE' } // drop order, keep position
+  }
+
   private tick(all: MapCurve[]) {
     const store = useFleetStore.getState()
     const now = Date.now()
     for (const b of this.bots) {
+      // paused/idle robots hold position but still report state
+      if (b.paused || b.status === 'PAUSE') {
+        this.report(store, b, now)
+        continue
+      }
       b.t += b.speed
       if (b.t >= 1) {
         // reached the end of this edge → count it as a completed leg, hop on
@@ -146,37 +162,42 @@ export class SimulationService {
         b.battery = Math.max(5, b.battery - 0.4)
         b.status = b.battery < 15 ? 'CHARGING' : 'EXECUTING'
       }
-      const pos  = pointOnCurve(b.curve, b.t)
-      const look = pointOnCurve(b.curve, Math.min(1, b.t + 0.05))
-      const theta = calcTheta(look.x - pos.x, look.y - pos.y)
-
-      const state: VDA5050State = {
-        headerId: now, timestamp: new Date().toISOString(), version: '2.0.0',
-        manufacturer: 'ATP', serialNumber: b.id,
-        orderId: `sim-${b.curve.id}`, orderUpdateId: 0,
-        lastNodeId: '', lastNodeSequenceId: 0,
-        driving: b.status === 'EXECUTING',
-        agvPosition: { x: pos.x, y: pos.y, theta, mapId: 'sim' },
-        velocity: { vx: b.status === 'EXECUTING' ? b.mps : 0, vy: 0, omega: 0 },
-        batteryState: { batteryCharge: Math.round(b.battery), charging: b.status === 'CHARGING' },
-        operatingMode: b.status,
-        errors: [], warnings: [],
-        safetyState: { fieldViolation: false, eStop: 'NONE' },
-      }
-      store.updateFromVDA5050(b.id, state)
-
-      // feed the VDA5050 stream panel, throttled to ~1/s per robot
-      if (now - b.lastLog > 1000) {
-        b.lastLog = now
-        store.pushMqttLog({
-          id: `${b.id}-${now}`,
-          robotId: b.id,
-          topic: 'state',
-          timestamp: new Date().toLocaleTimeString('en-GB'),
-        })
-      }
+      this.report(store, b, now)
     }
     store.setMqttLatency(20 + Math.round(Math.random() * 30))
+  }
+
+  /** Emit one synthetic VDA5050 state for a bot through the store pipeline. */
+  private report(store: ReturnType<typeof useFleetStore.getState>, b: SimBot, now: number) {
+    const pos  = pointOnCurve(b.curve, b.t)
+    const look = pointOnCurve(b.curve, Math.min(1, b.t + 0.05))
+    const theta = calcTheta(look.x - pos.x, look.y - pos.y)
+
+    const state: VDA5050State = {
+      headerId: now, timestamp: new Date().toISOString(), version: '2.0.0',
+      manufacturer: 'ATP', serialNumber: b.id,
+      orderId: b.status === 'EXECUTING' ? `sim-${b.curve.id}` : '', orderUpdateId: 0,
+      lastNodeId: '', lastNodeSequenceId: 0,
+      driving: b.status === 'EXECUTING',
+      agvPosition: { x: pos.x, y: pos.y, theta, mapId: 'sim' },
+      velocity: { vx: b.status === 'EXECUTING' ? b.mps : 0, vy: 0, omega: 0 },
+      batteryState: { batteryCharge: Math.round(b.battery), charging: b.status === 'CHARGING' },
+      operatingMode: b.status,
+      errors: [], warnings: [],
+      safetyState: { fieldViolation: false, eStop: 'NONE' },
+    }
+    store.updateFromVDA5050(b.id, state)
+
+    // feed the VDA5050 stream panel, throttled to ~1/s per robot
+    if (now - b.lastLog > 1000) {
+      b.lastLog = now
+      store.pushMqttLog({
+        id: `${b.id}-${now}`,
+        robotId: b.id,
+        topic: 'state',
+        timestamp: new Date().toLocaleTimeString('en-GB'),
+      })
+    }
   }
 }
 
