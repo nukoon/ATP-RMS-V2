@@ -31,6 +31,7 @@ interface SimBot {
   mission: BotMission | null
   fault: { until: number; error: VDA5050Error } | null
   lowBatt: boolean     // whether a LOW_BATTERY alarm is currently raised
+  yielding: boolean    // currently yielding to traffic this tick
   lastLog: number      // ms timestamp of last VDA stream entry
 }
 
@@ -42,6 +43,8 @@ const ARRIVE_DIST = 1.0           // map units: close enough to the target node
 const MISSION_TIMEOUT_TICKS = 2000
 const LOW_BATTERY = 20            // % — raise a warning below this
 const FAULT_CHANCE = 0.0006       // per bot per tick — random transient fault
+const TRAFFIC_RADIUS = 2.2        // map units: separation zone between AGVs
+const LOOKAHEAD = 0.06            // fraction of edge to look ahead for conflicts
 const KEY = (x: number, y: number) => `${x.toFixed(2)},${y.toFixed(2)}`
 const rand = <T,>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)]
 const uid = () => Math.random().toString(36).slice(2, 9)
@@ -138,6 +141,7 @@ export class SimulationService {
         mission: null,
         fault: null,
         lowBatt: false,
+        yielding: false,
         lastLog: 0,
       }
       store.upsertRobot({
@@ -198,11 +202,46 @@ export class SimulationService {
     }
   }
 
+  /** Priority used to decide who yields at a conflict (higher = right of way). */
+  private priority(b: SimBot): number {
+    // on-mission bots outrank free-roamers; stable tiebreak by serial
+    const base = b.mission ? 1000 : 0
+    return base - this.bots.indexOf(b)
+  }
+
+  /**
+   * Traffic control: a moving bot reserves a look-ahead zone. If another
+   * active bot already sits in that zone and has higher priority, this bot
+   * yields (holds position, status TRAFFIC) for this tick.
+   */
+  private resolveTraffic() {
+    // current positions of bots that physically occupy the floor
+    const occ = this.bots
+      .filter(b => b.status !== 'IDLE' && b.status !== 'UNKNOWN')
+      .map(b => ({ b, p: pointOnCurve(b.curve, b.t) }))
+
+    for (const b of this.bots) {
+      b.yielding = false
+      if (b.paused || b.fault || b.status === 'PAUSE' || b.status === 'ERROR' || b.status === 'CHARGING') continue
+
+      const ahead = pointOnCurve(b.curve, Math.min(1, b.t + LOOKAHEAD))
+      for (const other of occ) {
+        if (other.b === b) continue
+        const d = Math.hypot(ahead.x - other.p.x, ahead.y - other.p.y)
+        if (d < TRAFFIC_RADIUS && this.priority(other.b) > this.priority(b)) {
+          b.yielding = true
+          break
+        }
+      }
+    }
+  }
+
   private tick(all: MapCurve[]) {
     const store = useFleetStore.getState()
     const now = Date.now()
 
     this.dispatch(store)
+    this.resolveTraffic()
 
     for (const b of this.bots) {
       // transient fault recovery
@@ -221,6 +260,15 @@ export class SimulationService {
         this.report(store, b, now)
         continue
       }
+
+      // traffic: yield right-of-way, hold position this tick
+      if (b.yielding) {
+        if (b.status !== 'CHARGING') b.status = 'TRAFFIC'
+        this.report(store, b, now)
+        continue
+      }
+      // clear a stale TRAFFIC state once the path is free again
+      if (b.status === 'TRAFFIC') b.status = b.battery < 15 ? 'CHARGING' : 'EXECUTING'
 
       b.t += b.speed
       if (b.t >= 1) {

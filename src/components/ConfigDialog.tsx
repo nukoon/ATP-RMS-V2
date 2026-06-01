@@ -13,8 +13,8 @@ import { AGV_MODELS } from '@/constants'
 type Tab = 'amrs' | 'maps' | 'broker'
 const COLORS = ['#00d4ff', '#00ff88', '#ffb800', '#ff6b6b', '#a78bfa', '#ff8c00', '#08d26e', '#c90bfe']
 
-export function ConfigDialog({ onClose }: { onClose: () => void }) {
-  const [tab, setTab] = useState<Tab>('amrs')
+export function ConfigDialog({ onClose, initialTab = 'amrs' }: { onClose: () => void; initialTab?: Tab }) {
+  const [tab, setTab] = useState<Tab>(initialTab)
   return (
     <div onClick={onClose}
       style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>

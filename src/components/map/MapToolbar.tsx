@@ -1,5 +1,4 @@
 import type { MapViewConfig } from '@/types'
-import type { AgvModel } from '@/types'
 
 interface Props {
   config: MapViewConfig
@@ -33,20 +32,6 @@ const ChkRow = ({ label, checked, onChange }: { label: string; checked: boolean;
 export function MapToolbar({ config: cfg, zoom, onChange, onZoomIn, onZoomOut, onFit }: Props) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', background: '#0c1a28', borderBottom: '1px solid #152030', flexShrink: 0, overflowX: 'auto' }}>
-      {/* Model select */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '5px 10px', borderRight: '1px solid #152030' }}>
-        <span style={{ fontSize: 9, color: '#5a7080', letterSpacing: '1.5px', textTransform: 'uppercase' }}>Model</span>
-        {(['AM15', 'MP10S'] as AgvModel[]).map(m => (
-          <button key={m} onClick={() => onChange({ selectedModel: m })}
-            style={{
-              padding: '2px 7px', fontSize: 10, borderRadius: 2, cursor: 'pointer',
-              fontFamily: 'Rajdhani, sans-serif', transition: 'all .15s',
-              border: cfg.selectedModel === m ? '1px solid #00d4ff' : '1px solid #152030',
-              color: cfg.selectedModel === m ? '#00d4ff' : '#5a7080',
-              background: cfg.selectedModel === m ? 'rgba(0,212,255,0.1)' : 'transparent',
-            }}>{m}</button>
-        ))}
-      </div>
       <SliderRow label="Robot px"   value={cfg.robotSize}          min={16} max={80} step={2}   onChange={v => onChange({ robotSize: v })} />
       <SliderRow label="Node px"    value={cfg.nodeSize}           min={1}  max={10} step={0.5} onChange={v => onChange({ nodeSize: v })} />
       <SliderRow label="Label px"   value={cfg.labelSize}          min={6}  max={18} step={1}   onChange={v => onChange({ labelSize: v })} />

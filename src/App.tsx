@@ -9,7 +9,7 @@ import { loadMap, loadMapFromJson } from '@/services/map.service'
 import { simulationService } from '@/services/simulation.service'
 import { mqttService } from '@/services/mqtt.service'
 import { ConfigDialog } from '@/components/ConfigDialog'
-import { RobotList }    from '@/components/sidebar/RobotList'
+import { FleetSidebar } from '@/components/sidebar/FleetSidebar'
 import { VdaStream }    from '@/components/panels/VdaStream'
 import { MetricsPanel } from '@/components/panels/MetricsPanel'
 import { RobotDetail }  from '@/components/panels/RobotDetail'
@@ -29,7 +29,9 @@ export default function App() {
   const [tab, setTab] = useState<RightTab>('stream')
   const [cursor, setCursor] = useState<{ x: number; y: number } | null>(null)
   const [showConfig, setShowConfig] = useState(false)
+  const [configTab, setConfigTab] = useState<'amrs' | 'maps' | 'broker'>('amrs')
   const [live, setLive] = useState(false)
+  const openConfig = (t: 'amrs' | 'maps' | 'broker') => { setConfigTab(t); setShowConfig(true) }
   const alarms = useFleetStore(s => s.alarms)
   const missions = useFleetStore(s => s.missions)
   const activeAlarms = alarms.filter(a => a.status === 'ACTIVE').length
@@ -99,7 +101,7 @@ export default function App() {
           ))}
         </div>
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
-          <button onClick={() => setShowConfig(true)}
+          <button onClick={() => openConfig('broker')}
             style={{ fontFamily: 'Share Tech Mono', fontSize: 9, cursor: 'pointer', color: '#5a7080',
               border: '1px solid #152030', background: 'transparent', padding: '2px 7px', borderRadius: 2 }}>
             ⚙ CONFIG
@@ -133,13 +135,14 @@ export default function App() {
 
       {/* MAIN */}
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
-        {/* LEFT SIDEBAR */}
-        <div style={{ width: 190, background: '#0a1520', borderRight: '1px solid #152030', display: 'flex', flexDirection: 'column', overflow: 'hidden', flexShrink: 0 }}>
-          <div style={{ fontSize: 9, letterSpacing: 2, color: '#5a7080', padding: '8px 12px 6px', textTransform: 'uppercase', borderBottom: '1px solid #152030' }}>
-            AMR Fleet — <span style={{ color: '#00d4ff', fontFamily: 'Share Tech Mono' }}>{robotList.length} units</span>
-          </div>
-          <RobotList robots={robotList} selectedId={selectedRobotId} onSelect={setSelectedRobotId} />
-        </div>
+        {/* LEFT SIDEBAR — maps + AMR fleet */}
+        <FleetSidebar
+          robots={robotList}
+          selectedId={selectedRobotId}
+          onSelect={setSelectedRobotId}
+          onAddAmr={() => openConfig('amrs')}
+          onManageMaps={() => openConfig('maps')}
+        />
 
         {/* MAP AREA */}
         <div style={{ flex: 1, background: '#060a10', position: 'relative', overflow: 'hidden' }}>
@@ -214,7 +217,7 @@ export default function App() {
         heading={selectedRobot?.pose.theta ?? 0}
       />
 
-      {showConfig && <ConfigDialog onClose={() => setShowConfig(false)} />}
+      {showConfig && <ConfigDialog initialTab={configTab} onClose={() => setShowConfig(false)} />}
     </div>
   )
 }
