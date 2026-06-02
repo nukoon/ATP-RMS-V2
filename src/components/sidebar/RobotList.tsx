@@ -63,7 +63,7 @@ function RobotCard({ robot: r, selected, onClick }: { robot: Robot; selected: bo
             </span>
           </div>
           <div style={{ height: 2, background: '#d4dae3', borderRadius: 2, overflow: 'hidden', marginTop: 3 }}>
-            <div style={{ height: '100%', width: `${r.battery.batteryCharge}%`, background: batCol, borderRadius: 2, transition: 'width 0.5s' }} />
+            <div style={{ height: '100%', width: '100%', background: batCol, borderRadius: 2, transform: `scaleX(${r.battery.batteryCharge / 100})`, transformOrigin: 'left', transition: 'transform 0.5s' }} />
           </div>
         </div>
       </div>

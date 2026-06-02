@@ -191,7 +191,7 @@ export function OrderPanel({ onManageStorage }: { onManageStorage?: () => void }
             {(m.status === 'EXECUTING' || m.status === 'ASSIGNED') && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4 }}>
                 <div style={{ flex: 1, height: 3, background: '#d4dae3', borderRadius: 2, overflow: 'hidden' }}>
-                  <div style={{ height: '100%', width: `${m.progress}%`, background: '#16a34a', transition: 'width 0.4s' }} />
+                  <div style={{ height: '100%', width: '100%', background: '#16a34a', transform: `scaleX(${m.progress / 100})`, transformOrigin: 'left', transition: 'transform 0.4s' }} />
                 </div>
                 <span style={{ fontFamily: 'Roboto Mono', fontSize: 9, color: '#64748b' }}>{m.progress}%</span>
                 <button onClick={() => cancelMission(m.id)} title="Cancel"

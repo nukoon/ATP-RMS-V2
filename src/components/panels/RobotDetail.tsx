@@ -50,7 +50,7 @@ export function RobotDetail({ robot: r, onClose, onAction }: Props) {
               <span style={{ fontFamily: 'Roboto Mono', color: batCol }}>{Math.round(r.battery.batteryCharge)}%{r.battery.charging ? ' ⚡' : ''}</span>
             </div>
             <div style={{ height: 4, background: '#d4dae3', borderRadius: 2, overflow: 'hidden' }}>
-              <div style={{ height: '100%', width: `${r.battery.batteryCharge}%`, background: batCol, transition: 'width 0.5s' }} />
+              <div style={{ height: '100%', width: '100%', background: batCol, transform: `scaleX(${r.battery.batteryCharge / 100})`, transformOrigin: 'left', transition: 'transform 0.5s' }} />
             </div>
           </div>
         </div>
