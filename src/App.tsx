@@ -19,6 +19,9 @@ import { OrderPanel }   from '@/components/panels/OrderPanel'
 import { AlarmPanel }   from '@/components/panels/AlarmPanel'
 import { StoragePanel } from '@/components/panels/StoragePanel'
 import { StorageDialog } from '@/components/StorageDialog'
+import { MultiStorageDialog } from '@/components/MultiStorageDialog'
+import { TrafficAreaDialog } from '@/components/TrafficAreaDialog'
+import { FacilitiesDialog } from '@/components/FacilitiesDialog'
 import { MapToolbar }   from '@/components/map/MapToolbar'
 import { MapCanvas }    from '@/components/map/MapCanvas'
 import { StatusBar }    from '@/components/StatusBar'
@@ -36,6 +39,14 @@ export default function App() {
   const [configTab, setConfigTab] = useState<'amrs' | 'maps' | 'broker'>('amrs')
   const [live, setLive] = useState(false)
   const [showStorageDialog, setShowStorageDialog] = useState(false)
+  const [showFacilities, setShowFacilities] = useState(false)   // docks + traffic
+  // lasso nodes on the map → either bulk storage, or a traffic area
+  const [lasso, setLasso] = useState<null | 'storage' | 'traffic'>(null)
+  const [picked, setPicked] = useState<{ purpose: 'storage' | 'traffic'; ids: string[] } | null>(null)
+  // right-click context menu on a storage area (batch FULL/EMPTY)
+  const [areaMenu, setAreaMenu] = useState<{ areaId: string; x: number; y: number } | null>(null)
+  const setAreaState = useStorageStore(s => s.setAreaState)
+  const storageAreas = useStorageStore(s => s.areas)
   const openConfig = (t: 'amrs' | 'maps' | 'broker') => { setConfigTab(t); setShowConfig(true) }
   const alarms = useFleetStore(s => s.alarms)
   const missions = useFleetStore(s => s.missions)
@@ -154,6 +165,7 @@ export default function App() {
         config={mapConfig} zoom={ctrl.transform.scale}
         onChange={setMapConfig}
         onZoomIn={ctrl.zoomIn} onZoomOut={ctrl.zoomOut} onFit={ctrl.fitToCanvas}
+        onManageFacilities={() => setShowFacilities(true)}
       />
 
       {/* MAIN */}
@@ -178,9 +190,21 @@ export default function App() {
               onRobotClick={setSelectedRobotId}
               onHover={setCursor}
               ctrl={ctrl}
+              selectMode={!!lasso}
+              onSelectNodes={(ids) => { const p = lasso; setLasso(null); if (p && ids.length) setPicked({ purpose: p, ids }) }}
+              onAreaContextMenu={(areaId, x, y) => setAreaMenu({ areaId, x, y })}
             />
           ) : (
             <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#94a3b4', fontFamily: 'Roboto Mono', fontSize: 11 }}>Loading map...</div>
+          )}
+          {lasso && (
+            <div style={{ position: 'absolute', top: 10, left: '50%', transform: 'translateX(-50%)', zIndex: 6,
+              display: 'flex', alignItems: 'center', gap: 10, background: '#ffffff', border: `1px solid ${lasso === 'traffic' ? '#dc2626' : '#2563eb'}`,
+              borderRadius: 4, padding: '6px 12px', boxShadow: '0 4px 14px rgba(26,34,48,0.15)' }}>
+              <span style={{ fontSize: 11, color: '#1a2230' }}>▭ {lasso === 'traffic' ? 'ลากกรอบคลุมโหนด เพื่อสร้าง Traffic Area (โซนห้ามเข้าซ้อน)' : 'ลากกรอบคลุมโหนดที่ต้องการ เพื่อเพิ่ม Storage หลายจุด'}</span>
+              <button onClick={() => setLasso(null)}
+                style={{ fontSize: 10, color: '#dc2626', background: 'transparent', border: '1px solid rgba(220,38,38,0.35)', borderRadius: 2, cursor: 'pointer', padding: '2px 8px' }}>CANCEL</button>
+            </div>
           )}
         </div>
 
@@ -216,7 +240,7 @@ export default function App() {
                   </div>
                 )}
                 {tab === 'missions' && <OrderPanel onManageStorage={() => setShowStorageDialog(true)} />}
-                {tab === 'storage' && <StoragePanel onManage={() => setShowStorageDialog(true)} />}
+                {tab === 'storage' && <StoragePanel onManage={() => setShowStorageDialog(true)} onMultiAdd={() => { setSelectedRobotId(null); setLasso('storage') }} />}
                 {tab === 'alarms' && <AlarmPanel onSelectRobot={setSelectedRobotId} />}
               </div>
 
@@ -243,6 +267,38 @@ export default function App() {
 
       {showConfig && <ConfigDialog initialTab={configTab} onClose={() => setShowConfig(false)} />}
       {showStorageDialog && <StorageDialog onClose={() => setShowStorageDialog(false)} />}
+      {showFacilities && <FacilitiesDialog onClose={() => setShowFacilities(false)} onDrawTrafficArea={() => { setShowFacilities(false); setSelectedRobotId(null); setLasso('traffic') }} />}
+      {picked?.purpose === 'storage' && <MultiStorageDialog nodeIds={picked.ids} onClose={() => setPicked(null)} />}
+      {picked?.purpose === 'traffic' && <TrafficAreaDialog nodeIds={picked.ids} onClose={() => setPicked(null)} />}
+
+      {/* right-click area menu: batch FULL/EMPTY all members */}
+      {areaMenu && (() => {
+        const area = storageAreas.find(a => a.id === areaMenu.areaId)
+        return (
+          <div onClick={() => setAreaMenu(null)} onContextMenu={e => { e.preventDefault(); setAreaMenu(null) }}
+            style={{ position: 'fixed', inset: 0, zIndex: 1100 }}>
+            <div onClick={e => e.stopPropagation()}
+              style={{ position: 'absolute', left: Math.min(areaMenu.x, window.innerWidth - 150), top: Math.min(areaMenu.y, window.innerHeight - 110),
+                background: '#fff', border: '1px solid #d4dae3', borderRadius: 4, boxShadow: '0 6px 18px rgba(26,34,48,0.18)', overflow: 'hidden', minWidth: 140 }}>
+              <div style={{ padding: '6px 10px', fontSize: 10, fontFamily: 'Roboto Mono', color: '#2563eb', borderBottom: '1px solid #d4dae3' }}>
+                ▣ {area?.name ?? 'Area'}
+              </div>
+              <button onClick={() => { setAreaState(areaMenu.areaId, 'FULL').catch(() => {}); setAreaMenu(null) }}
+                style={menuItem('#16a34a')}>● ALL FULL</button>
+              <button onClick={() => { setAreaState(areaMenu.areaId, 'EMPTY').catch(() => {}); setAreaMenu(null) }}
+                style={menuItem('#64748b')}>○ ALL EMPTY</button>
+            </div>
+          </div>
+        )
+      })()}
     </div>
   )
+}
+
+// context-menu item style (batch FULL/EMPTY)
+function menuItem(color: string): React.CSSProperties {
+  return {
+    display: 'block', width: '100%', textAlign: 'left', padding: '7px 12px', fontSize: 11, fontWeight: 600,
+    fontFamily: 'Roboto Mono', cursor: 'pointer', color, background: 'transparent', border: 'none',
+  }
 }

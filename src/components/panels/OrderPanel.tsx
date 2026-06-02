@@ -5,7 +5,7 @@
  * VDA5050 action plan on the backend. On completion the storages flip state.
  */
 import { useState } from 'react'
-import type { Mission, Storage } from '@/types/fleet'
+import type { Mission, Storage, StorageArea } from '@/types/fleet'
 import { useFleetStore } from '@/store/fleet.store'
 import { useStorageStore } from '@/store/storage.store'
 import { useConfigStore } from '@/store/config.store'
@@ -32,31 +32,57 @@ export function OrderPanel({ onManageStorage }: { onManageStorage?: () => void }
   const broker      = useConfigStore(s => s.broker)
   const amrs        = useConfigStore(s => s.amrs)
 
+  const areas       = useStorageStore(s => s.areas)
+
   const pickups  = storages.filter(s => s.enabled && (s.kind === 'PICK' || s.kind === 'BOTH') && s.state === 'FULL')
   const dropoffs = storages.filter(s => s.enabled && (s.kind === 'DROP' || s.kind === 'BOTH') && s.state === 'EMPTY')
 
+  // batch: areas with at least one ready member (FULL pickups / EMPTY dropoffs)
+  const countIn = (areaId: string, set: Storage[]) => set.filter(s => s.areaId === areaId).length
+  const pickAreas = areas.filter(a => a.enabled && (a.kind === 'PICK' || a.kind === 'BOTH') && countIn(a.id, pickups) > 0)
+  const dropAreas = areas.filter(a => a.enabled && (a.kind === 'DROP' || a.kind === 'BOTH') && countIn(a.id, dropoffs) > 0)
+
+  const [mode, setMode] = useState<'single' | 'batch'>('single')
   const [from, setFrom] = useState('')
   const [to, setTo]     = useState('')
+  const [pArea, setPArea] = useState('')
+  const [dArea, setDArea] = useState('')
   const [priority, setPriority] = useState(5)
   const [busy, setBusy] = useState(false)
   const [err, setErr]   = useState('')
 
   const pickId = from || pickups[0]?.id || ''
   const dropId = to   || dropoffs[0]?.id || ''
-  const canCreate = !!pickId && !!dropId && pickId !== dropId && !busy
+  const pAreaId = pArea || pickAreas[0]?.id || ''
+  const dAreaId = dArea || dropAreas[0]?.id || ''
+  const canCreate = !busy && (mode === 'single'
+    ? (!!pickId && !!dropId && pickId !== dropId)
+    : (!!pAreaId && !!dAreaId))
 
   const create = async () => {
     if (!canCreate) return
     setErr(''); setBusy(true)
     try {
-      const m = await api.createMission({ pickupStorageId: pickId, dropoffStorageId: dropId, priority })
-      addMission(m)
-      // LIVE: publish a VDA5050 Order (with the resolved PICK/DROP actions) to a real robot
-      if (mqttConnected) {
-        const target = amrs.find(a => a.enabled)
-        if (target) mqttService.sendOrder(target.serial, buildVda5050Order(target.serial, broker.manufacturer, m, map))
+      if (mode === 'batch') {
+        const created = await api.createBatchMissions({ pickupAreaId: pAreaId, dropoffAreaId: dAreaId, priority })
+        for (const m of created) {
+          addMission(m)
+          if (mqttConnected) {
+            const target = amrs.find(a => a.enabled)
+            if (target) mqttService.sendOrder(target.serial, buildVda5050Order(target.serial, broker.manufacturer, m, map))
+          }
+        }
+        setPArea(''); setDArea('')
+      } else {
+        const m = await api.createMission({ pickupStorageId: pickId, dropoffStorageId: dropId, priority })
+        addMission(m)
+        // LIVE: publish a VDA5050 Order (with the resolved PICK/DROP actions) to a real robot
+        if (mqttConnected) {
+          const target = amrs.find(a => a.enabled)
+          if (target) mqttService.sendOrder(target.serial, buildVda5050Order(target.serial, broker.manufacturer, m, map))
+        }
+        setFrom(''); setTo('')
       }
-      setFrom(''); setTo('')
     } catch (e) {
       setErr(e instanceof ApiError ? e.message : 'failed to create mission')
     } finally {
@@ -80,8 +106,31 @@ export function OrderPanel({ onManageStorage }: { onManageStorage?: () => void }
 
       {/* Create form */}
       <div style={{ padding: '0 12px 8px', borderBottom: '1px solid #d4dae3', display: 'grid', gap: 5 }}>
-        <StorageSelect label="Pickup"  value={pickId} options={pickups}  onChange={setFrom} empty="No FULL pickup storage" />
-        <StorageSelect label="Dropoff" value={dropId} options={dropoffs} onChange={setTo}   empty="No EMPTY dropoff storage" />
+        {/* mode toggle: single storage vs batch (area) */}
+        <div style={{ display: 'flex', gap: 4 }}>
+          {(['single', 'batch'] as const).map(m => (
+            <button key={m} onClick={() => setMode(m)}
+              style={{ flex: 1, fontSize: 9, padding: '3px 0', borderRadius: 2, cursor: 'pointer', fontFamily: 'Roboto Mono',
+                color: mode === m ? '#2563eb' : '#64748b', border: `1px solid ${mode === m ? 'rgba(37,99,235,0.4)' : '#d4dae3'}`,
+                background: mode === m ? 'rgba(37,99,235,0.08)' : 'transparent' }}>
+              {m === 'single' ? 'SINGLE' : 'BATCH (AREA)'}
+            </button>
+          ))}
+        </div>
+        {mode === 'single' ? (
+          <>
+            <StorageSelect label="Pickup"  value={pickId} options={pickups}  onChange={setFrom} empty="No FULL pickup storage" />
+            <StorageSelect label="Dropoff" value={dropId} options={dropoffs} onChange={setTo}   empty="No EMPTY dropoff storage" />
+          </>
+        ) : (
+          <>
+            <AreaSelect label="Pick area" value={pAreaId} options={pickAreas} counts={a => countIn(a, pickups)} onChange={setPArea} empty="No area with FULL pickups" />
+            <AreaSelect label="Drop area" value={dAreaId} options={dropAreas} counts={a => countIn(a, dropoffs)} onChange={setDArea} empty="No area with EMPTY dropoffs" />
+            <div style={{ fontSize: 8, color: '#94a3b4' }}>
+              Creates {Math.min(countIn(pAreaId, pickups), countIn(dAreaId, dropoffs)) || 0} mission(s) — FULL pickups paired with EMPTY dropoffs.
+            </div>
+          </>
+        )}
         <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
           <span style={{ fontSize: 9, color: '#64748b', width: 42 }}>Prio</span>
           <input type="range" min={1} max={9} value={priority} onChange={e => setPriority(+e.target.value)}
@@ -92,7 +141,7 @@ export function OrderPanel({ onManageStorage }: { onManageStorage?: () => void }
           style={{ padding: '5px 0', fontSize: 10, fontWeight: 600, letterSpacing: 1, borderRadius: 2,
             cursor: canCreate ? 'pointer' : 'not-allowed', color: '#16a34a',
             border: '1px solid rgba(22,163,74,0.4)', background: 'rgba(22,163,74,0.08)', opacity: canCreate ? 1 : 0.4 }}>
-          {busy ? '… CREATING' : '+ CREATE MISSION'}
+          {busy ? '… CREATING' : mode === 'batch' ? '+ CREATE BATCH' : '+ CREATE MISSION'}
         </button>
         {err && <div style={{ fontSize: 9, color: '#dc2626' }}>{err}</div>}
         {!storages.length && <div style={{ fontSize: 9, color: '#94a3b4' }}>No storages yet — add some in the STORAGE tab.</div>}
@@ -137,6 +186,24 @@ export function OrderPanel({ onManageStorage }: { onManageStorage?: () => void }
           </div>
         ))}
       </div>
+    </div>
+  )
+}
+
+function AreaSelect({ label, value, options, counts, onChange, empty }:
+  { label: string; value: string; options: StorageArea[]; counts: (areaId: string) => number; onChange: (v: string) => void; empty: string }) {
+  return (
+    <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+      <span style={{ fontSize: 9, color: '#64748b', width: 42 }}>{label}</span>
+      {options.length ? (
+        <select value={value} onChange={e => onChange(e.target.value)}
+          style={{ flex: 1, fontSize: 10, fontFamily: 'Roboto Mono', background: '#f3f6fa', color: '#1a2230',
+            border: '1px solid #d4dae3', borderRadius: 2, padding: '3px 4px' }}>
+          {options.map(a => <option key={a.id} value={a.id}>{a.name} ({counts(a.id)})</option>)}
+        </select>
+      ) : (
+        <span style={{ flex: 1, fontSize: 9, color: '#94a3b4', fontStyle: 'italic' }}>{empty}</span>
+      )}
     </div>
   )
 }

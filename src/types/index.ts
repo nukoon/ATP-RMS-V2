@@ -123,6 +123,7 @@ export interface Robot {
   errors: VDA5050Error[]
   totalDistance: number        // meters travelled (session)
   lastUpdated: number          // Date.now()
+  carrying?: boolean           // true while transporting a load (pick → drop)
   // MQTT connection
   mqttConnected: boolean
 }
@@ -210,7 +211,6 @@ export interface MapViewConfig {
   showLM: boolean
   showAP: boolean
   showCH: boolean
-  showZones: boolean
   showEdges: boolean
   showPaths: boolean
   showTheta: boolean

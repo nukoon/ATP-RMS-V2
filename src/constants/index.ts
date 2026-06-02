@@ -58,14 +58,13 @@ export const DEFAULT_MAP_CONFIG = {
   showLM: true,
   showAP: true,
   showCH: true,
-  showZones: true,
   showEdges: true,
   showPaths: true,
   showTheta: false,
   showStorage: true,
-  nodeSize: 3,
-  labelSize: 11,
-  labelZoomThreshold: 1.5,
-  robotSize: 2.0,            // metres (true-to-scale footprint length)
+  nodeSize: 1,
+  labelSize: 12,
+  labelZoomThreshold: 1.0,
+  robotSize: 2.5,            // metres (true-to-scale footprint length)
   selectedModel: 'AM15' as AgvModel,
 }

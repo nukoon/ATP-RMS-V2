@@ -1,11 +1,16 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <!-- open / empty carton box (isometric), outline grey -->
-  <!-- open top rim (hollow) -->
-  <path d="M10 22 L32 14 L54 22 L32 30 Z" fill="rgba(124,147,168,0.10)" stroke="#7c93a8" stroke-width="2.5" stroke-linejoin="round"/>
-  <path d="M17 22 L32 16.5 L47 22 L32 27.5 Z" fill="none" stroke="#7c93a8" stroke-width="1.2" opacity="0.55"/>
-  <!-- left face -->
-  <path d="M10 22 L32 30 L32 54 L10 46 Z" fill="rgba(124,147,168,0.08)" stroke="#7c93a8" stroke-width="2.5" stroke-linejoin="round"/>
-  <!-- right face -->
-  <path d="M54 22 L32 30 L32 54 L54 46 Z" fill="rgba(124,147,168,0.04)" stroke="#7c93a8" stroke-width="2.5" stroke-linejoin="round"/>
-  <path d="M32 30 V54" stroke="#7c93a8" stroke-width="1.2" opacity="0.55"/>
+<svg xmlns="http://www.w3.org/2000/svg" id="WarehouseStockModelCargoStatusSymbol0" fill="none" viewBox="0 0 72 72">
+  <g>
+    <g>
+      <path d="M15,24.126953125L36,12.001953125L36,36.250953124999995L15,24.126953125Z" fill="#B9EBFF" fill-opacity="1"/>
+    </g>
+    <g>
+      <path d="M15,24.12591552734375L15,48.37591552734375L36,60.50091552734375L36,36.25091552734375L15,24.12591552734375Z" fill="#4B85BF" fill-opacity="1"/>
+    </g>
+    <g>
+      <path d="M56.9998779296875,24.126953125L35.9998779296875,12.001953125L35.9998779296875,36.250953124999995L56.9998779296875,24.126953125Z" fill="#4B85BF" fill-opacity="1"/>
+    </g>
+    <g>
+      <path d="M36.0010986328125,36.25090625L36.0010986328125,60.50390625L57.0010986328125,48.37890625L57.0010986328125,24.12890625L36.0010986328125,36.25090625Z" fill="#B9EBFF" fill-opacity="1"/>
+    </g>
+  </g>
 </svg>

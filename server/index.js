@@ -135,6 +135,7 @@ function rowToStorage(r) {
   return {
     id: String(r.id), name: r.name, nodeId: r.node_id,
     mapId: r.map_id != null ? String(r.map_id) : null,
+    areaId: r.area_id != null ? String(r.area_id) : null,
     kind: r.kind, state: r.state, label: r.label || '', enabled: !!r.enabled,
   }
 }
@@ -145,24 +146,25 @@ app.get('/api/storages', requireAuth, wrap(async (_req, res) => {
 }))
 
 app.post('/api/storages', requireAuth, wrap(async (req, res) => {
-  const { name, nodeId, kind, state, label, enabled } = req.body || {}
+  const { name, nodeId, kind, state, label, enabled, areaId } = req.body || {}
   if (!name || !nodeId) return res.status(400).json({ error: 'name and nodeId required' })
   const [exists] = await pool.query('SELECT id FROM storage WHERE name = ? LIMIT 1', [name])
   if (exists[0]) return res.status(409).json({ error: 'storage name already exists' })
   const [r] = await pool.query(
-    `INSERT INTO storage (name, node_id, kind, state, label, enabled)
-     VALUES (?, ?, ?, ?, ?, ?)`,
-    [name, nodeId, kind || 'BOTH', state || 'EMPTY', label || null, enabled === false ? 0 : 1],
+    `INSERT INTO storage (name, node_id, area_id, kind, state, label, enabled)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    [name, nodeId, areaId || null, kind || 'BOTH', state || 'EMPTY', label || null, enabled === false ? 0 : 1],
   )
   const [rows] = await pool.query('SELECT * FROM storage WHERE id = ?', [r.insertId])
   res.status(201).json(rowToStorage(rows[0]))
 }))
 
 app.patch('/api/storages/:id', requireAuth, wrap(async (req, res) => {
-  const { name, nodeId, kind, state, label, enabled } = req.body || {}
+  const { name, nodeId, kind, state, label, enabled, areaId } = req.body || {}
   const sets = [], vals = []
   if (name !== undefined)    { sets.push('name = ?');    vals.push(name) }
   if (nodeId !== undefined)  { sets.push('node_id = ?'); vals.push(nodeId) }
+  if (areaId !== undefined)  { sets.push('area_id = ?'); vals.push(areaId || null) }
   if (kind !== undefined)    { sets.push('kind = ?');    vals.push(kind) }
   if (state !== undefined)   { sets.push('state = ?');   vals.push(state) }
   if (label !== undefined)   { sets.push('label = ?');   vals.push(label || null) }
@@ -178,6 +180,148 @@ app.patch('/api/storages/:id', requireAuth, wrap(async (req, res) => {
 app.delete('/api/storages/:id', requireAuth, wrap(async (req, res) => {
   await pool.query('DELETE FROM storage_action WHERE storage_id = ?', [req.params.id])
   const [r] = await pool.query('DELETE FROM storage WHERE id = ?', [req.params.id])
+  if (!r.affectedRows) return res.status(404).json({ error: 'not found' })
+  res.json({ ok: true })
+}))
+
+// ── Storage areas (batch pickup/drop grouping) ────────────
+function rowToArea(r) {
+  return {
+    id: String(r.id), name: r.name, kind: r.kind,
+    mapId: r.map_id != null ? String(r.map_id) : null, enabled: !!r.enabled,
+  }
+}
+
+app.get('/api/areas', requireAuth, wrap(async (_req, res) => {
+  const [rows] = await pool.query('SELECT * FROM storage_area ORDER BY name')
+  res.json(rows.map(rowToArea))
+}))
+
+app.post('/api/areas', requireAuth, wrap(async (req, res) => {
+  const { name, kind, enabled } = req.body || {}
+  if (!name) return res.status(400).json({ error: 'name required' })
+  const [exists] = await pool.query('SELECT id FROM storage_area WHERE name = ? LIMIT 1', [name])
+  if (exists[0]) return res.status(409).json({ error: 'area name already exists' })
+  const [r] = await pool.query(
+    'INSERT INTO storage_area (name, kind, enabled) VALUES (?, ?, ?)',
+    [name, kind || 'BOTH', enabled === false ? 0 : 1],
+  )
+  const [rows] = await pool.query('SELECT * FROM storage_area WHERE id = ?', [r.insertId])
+  res.status(201).json(rowToArea(rows[0]))
+}))
+
+app.patch('/api/areas/:id', requireAuth, wrap(async (req, res) => {
+  const { name, kind, enabled } = req.body || {}
+  const sets = [], vals = []
+  if (name !== undefined)    { sets.push('name = ?');    vals.push(name) }
+  if (kind !== undefined)    { sets.push('kind = ?');    vals.push(kind) }
+  if (enabled !== undefined) { sets.push('enabled = ?'); vals.push(enabled ? 1 : 0) }
+  if (!sets.length) return res.status(400).json({ error: 'nothing to update' })
+  vals.push(req.params.id)
+  const [r] = await pool.query(`UPDATE storage_area SET ${sets.join(', ')} WHERE id = ?`, vals)
+  if (!r.affectedRows) return res.status(404).json({ error: 'not found' })
+  const [rows] = await pool.query('SELECT * FROM storage_area WHERE id = ?', [req.params.id])
+  res.json(rowToArea(rows[0]))
+}))
+
+app.delete('/api/areas/:id', requireAuth, wrap(async (req, res) => {
+  // orphan members rather than deleting the storages
+  await pool.query('UPDATE storage SET area_id = NULL WHERE area_id = ?', [req.params.id])
+  const [r] = await pool.query('DELETE FROM storage_area WHERE id = ?', [req.params.id])
+  if (!r.affectedRows) return res.status(404).json({ error: 'not found' })
+  res.json({ ok: true })
+}))
+
+// ── Docks (parking & charging points) ─────────────────────
+function rowToDock(r) {
+  return {
+    id: String(r.id), name: r.name, nodeId: r.node_id, type: r.type,
+    agvId: r.agv_id || null,
+    mapId: r.map_id != null ? String(r.map_id) : null, enabled: !!r.enabled,
+  }
+}
+
+app.get('/api/docks', requireAuth, wrap(async (_req, res) => {
+  const [rows] = await pool.query('SELECT * FROM dock ORDER BY type, name')
+  res.json(rows.map(rowToDock))
+}))
+
+app.post('/api/docks', requireAuth, wrap(async (req, res) => {
+  const { name, nodeId, type, agvId, enabled } = req.body || {}
+  if (!name || !nodeId) return res.status(400).json({ error: 'name and nodeId required' })
+  const [r] = await pool.query(
+    'INSERT INTO dock (name, node_id, type, agv_id, enabled) VALUES (?, ?, ?, ?, ?)',
+    [name, nodeId, type || 'PARK', agvId || null, enabled === false ? 0 : 1],
+  )
+  const [rows] = await pool.query('SELECT * FROM dock WHERE id = ?', [r.insertId])
+  res.status(201).json(rowToDock(rows[0]))
+}))
+
+app.patch('/api/docks/:id', requireAuth, wrap(async (req, res) => {
+  const { name, nodeId, type, agvId, enabled } = req.body || {}
+  const sets = [], vals = []
+  if (name !== undefined)    { sets.push('name = ?');    vals.push(name) }
+  if (nodeId !== undefined)  { sets.push('node_id = ?'); vals.push(nodeId) }
+  if (type !== undefined)    { sets.push('type = ?');    vals.push(type) }
+  if (agvId !== undefined)   { sets.push('agv_id = ?');  vals.push(agvId || null) }
+  if (enabled !== undefined) { sets.push('enabled = ?'); vals.push(enabled ? 1 : 0) }
+  if (!sets.length) return res.status(400).json({ error: 'nothing to update' })
+  vals.push(req.params.id)
+  const [r] = await pool.query(`UPDATE dock SET ${sets.join(', ')} WHERE id = ?`, vals)
+  if (!r.affectedRows) return res.status(404).json({ error: 'not found' })
+  const [rows] = await pool.query('SELECT * FROM dock WHERE id = ?', [req.params.id])
+  res.json(rowToDock(rows[0]))
+}))
+
+app.delete('/api/docks/:id', requireAuth, wrap(async (req, res) => {
+  const [r] = await pool.query('DELETE FROM dock WHERE id = ?', [req.params.id])
+  if (!r.affectedRows) return res.status(404).json({ error: 'not found' })
+  res.json({ ok: true })
+}))
+
+// ── Traffic areas (operator-defined mutual-exclusion zones) ──
+function rowToTrafficArea(r) {
+  return {
+    id: String(r.id), name: r.name, nodeIds: asParams(r.node_ids), capacity: r.capacity,
+    mapId: r.map_id != null ? String(r.map_id) : null, enabled: !!r.enabled,
+  }
+}
+
+app.get('/api/traffic-areas', requireAuth, wrap(async (_req, res) => {
+  const [rows] = await pool.query('SELECT * FROM traffic_area ORDER BY name')
+  res.json(rows.map(rowToTrafficArea))
+}))
+
+app.post('/api/traffic-areas', requireAuth, wrap(async (req, res) => {
+  const { name, nodeIds, capacity, enabled } = req.body || {}
+  if (!name || !Array.isArray(nodeIds) || !nodeIds.length) return res.status(400).json({ error: 'name and nodeIds required' })
+  const [exists] = await pool.query('SELECT id FROM traffic_area WHERE name = ? LIMIT 1', [name])
+  if (exists[0]) return res.status(409).json({ error: 'traffic area name already exists' })
+  const [r] = await pool.query(
+    'INSERT INTO traffic_area (name, node_ids, capacity, enabled) VALUES (?, ?, ?, ?)',
+    [name, JSON.stringify(nodeIds), capacity || 1, enabled === false ? 0 : 1],
+  )
+  const [rows] = await pool.query('SELECT * FROM traffic_area WHERE id = ?', [r.insertId])
+  res.status(201).json(rowToTrafficArea(rows[0]))
+}))
+
+app.patch('/api/traffic-areas/:id', requireAuth, wrap(async (req, res) => {
+  const { name, nodeIds, capacity, enabled } = req.body || {}
+  const sets = [], vals = []
+  if (name !== undefined)     { sets.push('name = ?');     vals.push(name) }
+  if (nodeIds !== undefined)  { sets.push('node_ids = ?'); vals.push(JSON.stringify(nodeIds)) }
+  if (capacity !== undefined) { sets.push('capacity = ?'); vals.push(capacity) }
+  if (enabled !== undefined)  { sets.push('enabled = ?');  vals.push(enabled ? 1 : 0) }
+  if (!sets.length) return res.status(400).json({ error: 'nothing to update' })
+  vals.push(req.params.id)
+  const [r] = await pool.query(`UPDATE traffic_area SET ${sets.join(', ')} WHERE id = ?`, vals)
+  if (!r.affectedRows) return res.status(404).json({ error: 'not found' })
+  const [rows] = await pool.query('SELECT * FROM traffic_area WHERE id = ?', [req.params.id])
+  res.json(rowToTrafficArea(rows[0]))
+}))
+
+app.delete('/api/traffic-areas/:id', requireAuth, wrap(async (req, res) => {
+  const [r] = await pool.query('DELETE FROM traffic_area WHERE id = ?', [req.params.id])
   if (!r.affectedRows) return res.status(404).json({ error: 'not found' })
   res.json({ ok: true })
 }))
@@ -328,11 +472,16 @@ app.post('/api/missions', requireAuth, wrap(async (req, res) => {
   const dropoff = stores.find(s => String(s.id) === String(dropoffStorageId))
   if (!pickup || !dropoff) return res.status(400).json({ error: 'unknown storage' })
 
+  res.status(201).json(await insertMission(pickup, dropoff, priority))
+}))
+
+// Insert one storage→storage transport mission, return the joined row.
+async function insertMission(pickup, dropoff, priority) {
   const actions = [
     ...(await resolveStageActions(pickup.id, 'PICK')),
     ...(await resolveStageActions(dropoff.id, 'DROP')),
   ]
-  const missionNo = `MS-${Date.now().toString(36).toUpperCase()}`
+  const missionNo = `MS-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 5)}`
   const [r] = await pool.query(
     `INSERT INTO mission (mission_no, type, status, priority, start_node, end_node, progress,
         pickup_storage_id, dropoff_storage_id, actions)
@@ -340,7 +489,33 @@ app.post('/api/missions', requireAuth, wrap(async (req, res) => {
     [missionNo, priority || 5, pickup.node_id, dropoff.node_id, pickup.id, dropoff.id, JSON.stringify(actions)],
   )
   const [rows] = await pool.query(`${SELECT_MISSION} WHERE m.id = ?`, [r.insertId])
-  res.status(201).json(rowToMission(rows[0]))
+  return rowToMission(rows[0])
+}
+
+// Batch: pair every FULL pickup storage in the pickup area with an EMPTY
+// dropoff storage in the dropoff area (zipped, min count), one mission each.
+app.post('/api/missions/batch', requireAuth, wrap(async (req, res) => {
+  const { pickupAreaId, dropoffAreaId, priority } = req.body || {}
+  if (!pickupAreaId || !dropoffAreaId) return res.status(400).json({ error: 'pickupAreaId and dropoffAreaId required' })
+
+  const [pickups] = await pool.query(
+    `SELECT id, name, node_id FROM storage
+      WHERE area_id = ? AND enabled = 1 AND state = 'FULL' AND kind IN ('PICK','BOTH') ORDER BY name`,
+    [pickupAreaId])
+  const [dropoffs] = await pool.query(
+    `SELECT id, name, node_id FROM storage
+      WHERE area_id = ? AND enabled = 1 AND state = 'EMPTY' AND kind IN ('DROP','BOTH') ORDER BY name`,
+    [dropoffAreaId])
+
+  const n = Math.min(pickups.length, dropoffs.length)
+  if (!n) return res.status(400).json({ error: 'no FULL pickups / EMPTY dropoffs available in the chosen areas' })
+
+  const created = []
+  for (let i = 0; i < n; i++) {
+    if (String(pickups[i].id) === String(dropoffs[i].id)) continue
+    created.push(await insertMission(pickups[i], dropoffs[i], priority))
+  }
+  res.status(201).json(created)
 }))
 
 app.patch('/api/missions/:id', requireAuth, wrap(async (req, res) => {

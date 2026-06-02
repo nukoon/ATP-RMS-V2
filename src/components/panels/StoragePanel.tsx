@@ -9,7 +9,7 @@ import { useFleetStore } from '@/store/fleet.store'
 import type { StorageKind } from '@/types/fleet'
 import { ApiError } from '@/services/api'
 
-export function StoragePanel({ onManage }: { onManage: () => void }) {
+export function StoragePanel({ onManage, onMultiAdd }: { onManage: () => void; onMultiAdd?: () => void }) {
   const { storages, loaded, loadAll, addStorage, removeStorage, setState } = useStorageStore()
   const map = useFleetStore(s => s.map)
   const nodes = (map?.points ?? []).filter(p => p.cls !== 'Charge')
@@ -38,8 +38,12 @@ export function StoragePanel({ onManage }: { onManage: () => void }) {
         <span style={{ fontSize: 9, letterSpacing: 2, color: '#64748b', textTransform: 'uppercase' }}>
           Storage — <span style={{ color: '#2563eb', fontFamily: 'Roboto Mono' }}>{storages.filter(s => s.state === 'FULL').length}/{storages.length} full</span>
         </span>
+        {onMultiAdd && (
+          <button onClick={onMultiAdd} title="Lasso nodes on the map to add many storages at once"
+            style={{ marginLeft: 'auto', fontSize: 8, color: '#7c3aed', background: 'rgba(124,58,237,0.08)', border: '1px solid rgba(124,58,237,0.3)', borderRadius: 2, cursor: 'pointer', padding: '2px 6px', fontFamily: 'Roboto Mono' }}>▭ MULTI-ADD</button>
+        )}
         <button onClick={onManage} title="Manage storages & actions"
-          style={{ marginLeft: 'auto', fontSize: 8, color: '#2563eb', background: 'rgba(37,99,235,0.08)', border: '1px solid rgba(37,99,235,0.3)', borderRadius: 2, cursor: 'pointer', padding: '2px 6px', fontFamily: 'Roboto Mono' }}>⚙ MANAGE</button>
+          style={{ marginLeft: onMultiAdd ? 6 : 'auto', fontSize: 8, color: '#2563eb', background: 'rgba(37,99,235,0.08)', border: '1px solid rgba(37,99,235,0.3)', borderRadius: 2, cursor: 'pointer', padding: '2px 6px', fontFamily: 'Roboto Mono' }}>⚙ MANAGE</button>
       </div>
 
       {/* quick add */}

@@ -5,7 +5,7 @@
  */
 import { useAuthStore } from '@/store/auth.store'
 import type {
-  AmrConfig, SysUser, Storage, VdaActionTemplate, StorageActionBinding, Mission,
+  AmrConfig, SysUser, Storage, StorageArea, Dock, TrafficArea, VdaActionTemplate, StorageActionBinding, Mission,
 } from '@/types/fleet'
 
 export class ApiError extends Error {
@@ -73,6 +73,30 @@ export const api = {
   deleteStorage: (id: string) =>
     request<{ ok: true }>(`/storages/${encodeURIComponent(id)}`, { method: 'DELETE' }),
 
+  // Storage areas (batch grouping)
+  listAreas: () => request<StorageArea[]>('/areas'),
+  createArea: (a: Partial<StorageArea>) => request<StorageArea>('/areas', { method: 'POST', body: JSON.stringify(a) }),
+  updateArea: (id: string, patch: Partial<StorageArea>) =>
+    request<StorageArea>(`/areas/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+  deleteArea: (id: string) =>
+    request<{ ok: true }>(`/areas/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+
+  // Docks (parking & charging points)
+  listDocks: () => request<Dock[]>('/docks'),
+  createDock: (d: Partial<Dock>) => request<Dock>('/docks', { method: 'POST', body: JSON.stringify(d) }),
+  updateDock: (id: string, patch: Partial<Dock>) =>
+    request<Dock>(`/docks/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+  deleteDock: (id: string) =>
+    request<{ ok: true }>(`/docks/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+
+  // Traffic areas (mutual-exclusion zones)
+  listTrafficAreas: () => request<TrafficArea[]>('/traffic-areas'),
+  createTrafficArea: (a: Partial<TrafficArea>) => request<TrafficArea>('/traffic-areas', { method: 'POST', body: JSON.stringify(a) }),
+  updateTrafficArea: (id: string, patch: Partial<TrafficArea>) =>
+    request<TrafficArea>(`/traffic-areas/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+  deleteTrafficArea: (id: string) =>
+    request<{ ok: true }>(`/traffic-areas/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+
   // VDA5050 action templates
   listActions: () => request<VdaActionTemplate[]>('/actions'),
   createAction: (a: Partial<VdaActionTemplate>) => request<VdaActionTemplate>('/actions', { method: 'POST', body: JSON.stringify(a) }),
@@ -97,6 +121,8 @@ export const api = {
   },
   createMission: (m: { pickupStorageId: string; dropoffStorageId: string; priority?: number }) =>
     request<Mission>('/missions', { method: 'POST', body: JSON.stringify(m) }),
+  createBatchMissions: (m: { pickupAreaId: string; dropoffAreaId: string; priority?: number }) =>
+    request<Mission[]>('/missions/batch', { method: 'POST', body: JSON.stringify(m) }),
   patchMission: (id: string, patch: Partial<Mission>) =>
     request<Mission>(`/missions/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(patch) }),
 }

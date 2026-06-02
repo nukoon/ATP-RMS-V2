@@ -1,12 +1,22 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <!-- closed carton box (isometric), loaded = green -->
-  <!-- top lid -->
-  <path d="M10 20 L32 12 L54 20 L32 28 Z" fill="rgba(0,255,136,0.45)" stroke="#00ff88" stroke-width="2.5" stroke-linejoin="round"/>
-  <!-- left face -->
-  <path d="M10 20 L32 28 L32 54 L10 46 Z" fill="rgba(0,255,136,0.28)" stroke="#00ff88" stroke-width="2.5" stroke-linejoin="round"/>
-  <!-- right face -->
-  <path d="M54 20 L32 28 L32 54 L54 46 Z" fill="rgba(0,255,136,0.16)" stroke="#00ff88" stroke-width="2.5" stroke-linejoin="round"/>
-  <!-- packing tape down the seam -->
-  <path d="M32 28 V54" stroke="#0a1520" stroke-width="1.8"/>
-  <path d="M10 20 L32 28 L54 20" fill="none" stroke="#0a1520" stroke-width="1.2" opacity="0.5"/>
+<svg xmlns="http://www.w3.org/2000/svg" id="WarehouseStockModelCargoStatusSymbol1" fill="none" viewBox="0 0 72 72">
+  <g>
+    <g>
+      <path d="M14.995849609375,24.12396240234375L14.995849609375,48.372962402343745L35.995849609375,60.49696240234375L35.995849609375,36.24896240234375L14.995849609375,24.12396240234375Z" fill="#DE8D36" fill-opacity="1"/>
+    </g>
+    <g>
+      <path d="M35.995849609375,12L14.995849609375,24.124000000000002L35.995849609375,36.248000000000005L56.995849609375,24.124000000000002L35.995849609375,12Z" fill="#F5AD61" fill-opacity="1"/>
+    </g>
+    <g>
+      <path d="M35.995849609375,36.24896240234375L35.995849609375,60.50196240234375L56.995849609375,48.377962402343755L56.995849609375,24.12396240234375L35.995849609375,36.24896240234375Z" fill="#F79633" fill-opacity="1"/>
+    </g>
+    <g style="opacity:.5">
+      <path d="M23.291015625,19.3369773046875L44.291015625,31.4609873046875L48.708015625,28.910987304687502L27.708005625,16.7869873046875L23.291015625,19.3369773046875Z" fill="#FFFFFF" fill-opacity="1"/>
+    </g>
+    <g style="opacity:.5">
+      <path d="M44.291015625,55.71002197265625L48.708985625,53.15899197265625L48.708985625,45.71002197265625L44.291015625,48.26001197265625L44.291015625,55.71002197265625Z" fill="#FFFFFF" fill-opacity="1"/>
+    </g>
+    <g style="opacity:.5">
+      <path d="M44.291015625,31.4620373046875L44.291015625,38.9110073046875L48.708985625,36.3599873046875L48.708985625,28.9119873046875" fill="#FFFFFF" fill-opacity="1"/>
+    </g>
+  </g>
 </svg>

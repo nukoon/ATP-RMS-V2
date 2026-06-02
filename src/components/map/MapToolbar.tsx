@@ -7,6 +7,7 @@ interface Props {
   onZoomIn: () => void
   onZoomOut: () => void
   onFit: () => void
+  onManageFacilities?: () => void
 }
 
 const SliderRow = ({ label, value, min, max, step, onChange, suffix = '' }:
@@ -29,7 +30,7 @@ const ChkRow = ({ label, checked, onChange }: { label: string; checked: boolean;
   </label>
 )
 
-export function MapToolbar({ config: cfg, zoom, onChange, onZoomIn, onZoomOut, onFit }: Props) {
+export function MapToolbar({ config: cfg, zoom, onChange, onZoomIn, onZoomOut, onFit, onManageFacilities }: Props) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', background: '#f3f6fa', borderBottom: '1px solid #d4dae3', flexShrink: 0, overflowX: 'auto' }}>
       <SliderRow label="Robot m"    value={cfg.robotSize}          min={1}  max={6}  step={0.5} onChange={v => onChange({ robotSize: v })} suffix="m" />
@@ -41,12 +42,21 @@ export function MapToolbar({ config: cfg, zoom, onChange, onZoomIn, onZoomOut, o
         <ChkRow label="LM"    checked={cfg.showLM}     onChange={v => onChange({ showLM: v })} />
         <ChkRow label="AP"    checked={cfg.showAP}     onChange={v => onChange({ showAP: v })} />
         <ChkRow label="CHG"   checked={cfg.showCH}     onChange={v => onChange({ showCH: v })} />
-        <ChkRow label="Zones" checked={cfg.showZones}  onChange={v => onChange({ showZones: v })} />
         <ChkRow label="Edges" checked={cfg.showEdges}  onChange={v => onChange({ showEdges: v })} />
         <ChkRow label="Path"  checked={cfg.showPaths}  onChange={v => onChange({ showPaths: v })} />
         <ChkRow label="θ Dir" checked={cfg.showTheta}  onChange={v => onChange({ showTheta: v })} />
         <ChkRow label="Store" checked={cfg.showStorage} onChange={v => onChange({ showStorage: v })} />
       </div>
+      {/* Facilities (docks + traffic) */}
+      {onManageFacilities && (
+        <div style={{ display: 'flex', alignItems: 'center', padding: '5px 10px', borderRight: '1px solid #d4dae3' }}>
+          <button onClick={onManageFacilities} title="Manage parking/charging docks & traffic areas"
+            style={{ padding: '3px 9px', fontSize: 9, fontFamily: 'Roboto Mono', borderRadius: 2, cursor: 'pointer',
+              border: '1px solid #d4dae3', color: '#2563eb', background: 'rgba(37,99,235,0.06)' }}>
+            🅿 DOCKS / ⛒ TRAFFIC
+          </button>
+        </div>
+      )}
       {/* Zoom buttons */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '5px 10px', marginLeft: 'auto' }}>
         <span style={{ fontFamily: 'Roboto Mono', fontSize: 10, color: '#64748b' }}>{zoom.toFixed(2)}×</span>

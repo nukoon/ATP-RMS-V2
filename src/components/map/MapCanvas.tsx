@@ -2,13 +2,14 @@
  * MapCanvas — Main 2D fleet map renderer (Canvas API)
  * Draws: grid, zones, edges (bezier+line), nodes, robot paths, robots
  */
-import { useEffect, useRef, useCallback } from 'react'
-import type { FleetMap, Robot, MapViewConfig } from '@/types'
-import type { Storage } from '@/types/fleet'
+import { useEffect, useRef, useCallback, useState } from 'react'
+import type { FleetMap, Robot, MapViewConfig, MapPoint } from '@/types'
+import type { Storage, Dock, StorageArea, TrafficArea } from '@/types/fleet'
 import type { Transform } from '@/utils/canvas'
 import { worldToScreen, screenToWorld, thetaToScreenRot } from '@/utils/canvas'
 import { STATUS_COLOR, AGV_ASSET_PATH } from '@/constants'
 import { useStorageStore } from '@/store/storage.store'
+import { useFleetStore } from '@/store/fleet.store'
 import type { useMapTransform } from '@/hooks/useMapTransform'
 
 interface Props {
@@ -19,6 +20,11 @@ interface Props {
   onRobotClick:  (id: string | null) => void
   onHover?: (world: { x: number; y: number } | null) => void
   ctrl: ReturnType<typeof useMapTransform>
+  // rubber-band node selection (multi-add storage): drag a box to pick nodes
+  selectMode?: boolean
+  onSelectNodes?: (ids: string[]) => void
+  // right-click a storage area on the map → context menu (batch FULL/EMPTY)
+  onAreaContextMenu?: (areaId: string, clientX: number, clientY: number) => void
 }
 
 const EMPTY_SET: Set<string> = new Set()
@@ -34,9 +40,14 @@ function getCachedImg(src: string): HTMLImageElement {
   return imgCache.get(src)!
 }
 
-export function MapCanvas({ map, robots, config, selectedRobotId, onRobotClick, onHover, ctrl }: Props) {
+export function MapCanvas({ map, robots, config, selectedRobotId, onRobotClick, onHover, ctrl, selectMode, onSelectNodes, onAreaContextMenu }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const animRef   = useRef<number>()
+  // rubber-band selection rectangle (screen px), drawn each frame via a ref
+  const selRectRef = useRef<{ x0: number; y0: number; x1: number; y1: number } | null>(null)
+  const selectingRef = useRef(false)
+  const selectModeRef = useRef(selectMode)
+  selectModeRef.current = selectMode
   const t = ctrl.transform
   const tRef = useRef(t)
   tRef.current = t
@@ -46,6 +57,28 @@ export function MapCanvas({ map, robots, config, selectedRobotId, onRobotClick, 
   const storages = useStorageStore(s => s.storages)
   const storagesRef = useRef<Storage[]>(storages)
   storagesRef.current = storages
+  const docks = useStorageStore(s => s.docks)
+  const docksRef = useRef<Dock[]>(docks)
+  docksRef.current = docks
+  const areas = useStorageStore(s => s.areas)
+  const areasRef = useRef<StorageArea[]>(areas)
+  areasRef.current = areas
+  const trafficAreas = useStorageStore(s => s.trafficAreas)
+  const trafficRef = useRef<TrafficArea[]>(trafficAreas)
+  trafficRef.current = trafficAreas
+  // storages currently reserved by an active job → show an "occupy" badge
+  const missions = useFleetStore(s => s.missions)
+  const occupiedRef = useRef<Set<string>>(new Set())
+  occupiedRef.current = new Set(
+    missions
+      .filter(m => m.status === 'EXECUTING' || m.status === 'ASSIGNED')
+      .flatMap(m => [m.pickupStorageId, m.dropoffStorageId])
+      .filter((id): id is string => !!id),
+  )
+  // clicked node → info card + canvas highlight (drawn from world coords each frame)
+  const [selectedNode, setSelectedNode] = useState<MapPoint | null>(null)
+  const selectedNodeRef = useRef<MapPoint | null>(null)
+  selectedNodeRef.current = selectedNode
 
   // Keep canvas pixel size in sync with its CSS box; fit map on first size
   useEffect(() => {
@@ -77,7 +110,6 @@ export function MapCanvas({ map, robots, config, selectedRobotId, onRobotClick, 
     ctx.clearRect(0, 0, canvas.width, canvas.height)
 
     drawGrid(ctx, canvas.width, canvas.height, tt)
-    drawZones(ctx, map, tt, config)
     drawAxes(ctx, tt)
     drawEdges(ctx, map, tt, config)
     robots.forEach(r => drawRobotPath(ctx, map, r, tt, config))
@@ -85,9 +117,29 @@ export function MapCanvas({ map, robots, config, selectedRobotId, onRobotClick, 
     const storageNodes = config.showStorage
       ? new Set(storagesRef.current.filter(s => s.enabled).map(s => s.nodeId))
       : EMPTY_SET
+    drawTrafficAreas(ctx, map, trafficRef.current, tt, config)
+    if (config.showStorage) drawAreas(ctx, map, areasRef.current, storagesRef.current, tt, config)
     drawNodes(ctx, map, tt, config, storageNodes)
-    if (config.showStorage) drawStorages(ctx, map, storagesRef.current, tt, config)
+    if (config.showStorage) drawDocks(ctx, map, docksRef.current, tt)
+    if (config.showStorage) drawStorages(ctx, map, storagesRef.current, occupiedRef.current, tt, config)
     robots.forEach(r => drawRobot(ctx, r, tt, config, selectedRobotId))
+
+    // highlight the clicked node
+    const sn = selectedNodeRef.current
+    if (sn) {
+      const { sx, sy } = worldToScreen(sn.x, sn.y, tt)
+      ctx.beginPath(); ctx.arc(sx, sy, 9, 0, Math.PI * 2)
+      ctx.strokeStyle = '#2563eb'; ctx.lineWidth = 2; ctx.setLineDash([3, 3]); ctx.stroke(); ctx.setLineDash([])
+    }
+
+    // rubber-band selection box
+    const r = selRectRef.current
+    if (r) {
+      const x = Math.min(r.x0, r.x1), y = Math.min(r.y0, r.y1)
+      const w = Math.abs(r.x1 - r.x0), h = Math.abs(r.y1 - r.y0)
+      ctx.fillStyle = 'rgba(37,99,235,0.10)'; ctx.fillRect(x, y, w, h)
+      ctx.strokeStyle = '#2563eb'; ctx.lineWidth = 1; ctx.setLineDash([4, 3]); ctx.strokeRect(x, y, w, h); ctx.setLineDash([])
+    }
 
     animRef.current = requestAnimationFrame(draw)
   }, [map, robots, config, selectedRobotId])
@@ -117,44 +169,134 @@ export function MapCanvas({ map, robots, config, selectedRobotId, onRobotClick, 
   const onMouseDown = useCallback((e: React.MouseEvent) => {
     movedRef.current = false
     const { x, y } = pos(e)
+    if (selectModeRef.current) { selectingRef.current = true; selRectRef.current = { x0: x, y0: y, x1: x, y1: y }; return }
     ctrl.handleMouseDown(x, y)
   }, [ctrl])
 
   const onMouseMove = useCallback((e: React.MouseEvent) => {
     if (e.buttons === 1) movedRef.current = true
     const { x, y } = pos(e)
+    if (selectModeRef.current && selectingRef.current && selRectRef.current) {
+      selRectRef.current = { ...selRectRef.current, x1: x, y1: y }
+      onHover?.(screenToWorld(x, y, tRef.current))
+      return
+    }
     ctrl.handleMouseMove(x, y)
     onHover?.(screenToWorld(x, y, tRef.current))
   }, [ctrl, onHover])
 
-  const onMouseUp = useCallback(() => ctrl.handleMouseUp(), [ctrl])
-  const onLeave = useCallback(() => { ctrl.handleMouseUp(); onHover?.(null) }, [ctrl, onHover])
+  const finishSelection = useCallback(() => {
+    const r = selRectRef.current
+    selectingRef.current = false
+    selRectRef.current = null
+    if (!r) return
+    const minX = Math.min(r.x0, r.x1), maxX = Math.max(r.x0, r.x1)
+    const minY = Math.min(r.y0, r.y1), maxY = Math.max(r.y0, r.y1)
+    if (maxX - minX < 4 && maxY - minY < 4) return  // a click, not a drag
+    const ids: string[] = []
+    for (const p of map.points) {
+      const { sx, sy } = worldToScreen(p.x, p.y, tRef.current)
+      if (sx >= minX && sx <= maxX && sy >= minY && sy <= maxY) ids.push(p.id)
+    }
+    onSelectNodes?.(ids)
+  }, [map, onSelectNodes])
 
-  // Click → robot selection (suppressed if the click was a drag)
+  const onMouseUp = useCallback(() => {
+    if (selectModeRef.current) { finishSelection(); return }
+    ctrl.handleMouseUp()
+  }, [ctrl, finishSelection])
+  const onLeave = useCallback(() => {
+    if (selectModeRef.current && selectingRef.current) finishSelection()
+    ctrl.handleMouseUp(); onHover?.(null)
+  }, [ctrl, onHover, finishSelection])
+
+  // Click → robot selection, else node info, else clear (suppressed on drag)
   const handleClick = useCallback((e: React.MouseEvent) => {
-    if (movedRef.current) return
+    if (movedRef.current || selectModeRef.current) return
     const { x: mx, y: my } = pos(e)
     const hitR = Math.max(14, config.robotSize * 0.6)
     for (const r of robots) {
       const { sx, sy } = worldToScreen(r.pose.x, r.pose.y, tRef.current)
       if (Math.hypot(mx - sx, my - sy) < hitR) {
         onRobotClick(selectedRobotId === r.id ? null : r.id)
+        setSelectedNode(null)
         return
       }
     }
-    onRobotClick(null)
-  }, [robots, config.robotSize, selectedRobotId, onRobotClick])
+    // node hit-test (nearest within ~12px)
+    let best: MapPoint | null = null, bestD = 12
+    for (const p of map.points) {
+      const { sx, sy } = worldToScreen(p.x, p.y, tRef.current)
+      const d = Math.hypot(mx - sx, my - sy)
+      if (d < bestD) { bestD = d; best = p }
+    }
+    if (best) { setSelectedNode(prev => prev?.id === best!.id ? null : best); onRobotClick(null); return }
+    onRobotClick(null); setSelectedNode(null)
+  }, [robots, map, config.robotSize, selectedRobotId, onRobotClick])
+
+  // right-click → if the cursor is inside a storage area's box, open its menu
+  const onContextMenu = useCallback((e: React.MouseEvent) => {
+    if (!onAreaContextMenu) return
+    const { x: mx, y: my } = pos(e)
+    const tt = tRef.current
+    const pad = 2.0
+    let hit: string | null = null
+    for (const a of areasRef.current) {
+      if (!a.enabled) continue
+      const pts = storagesRef.current
+        .filter(s => s.areaId === a.id && s.enabled)
+        .map(s => map.points.find(p => p.id === s.nodeId))
+        .filter((p): p is MapPoint => !!p)
+      if (!pts.length) continue
+      const xs = pts.map(p => p.x), ys = pts.map(p => p.y)
+      const tl = worldToScreen(Math.min(...xs) - pad, Math.max(...ys) + pad, tt)
+      const br = worldToScreen(Math.max(...xs) + pad, Math.min(...ys) - pad, tt)
+      if (mx >= tl.sx && mx <= br.sx && my >= tl.sy && my <= br.sy) hit = a.id  // topmost wins
+    }
+    if (hit) { e.preventDefault(); onAreaContextMenu(hit, e.clientX, e.clientY) }
+  }, [map, onAreaContextMenu])
+
+  const np = selectedNode ? worldToScreen(selectedNode.x, selectedNode.y, t) : null
 
   return (
-    <canvas
-      ref={canvasRef}
-      style={{ width: '100%', height: '100%', display: 'block', cursor: 'grab' }}
-      onClick={handleClick}
-      onMouseDown={onMouseDown}
-      onMouseMove={onMouseMove}
-      onMouseUp={onMouseUp}
-      onMouseLeave={onLeave}
-    />
+    <div style={{ position: 'relative', width: '100%', height: '100%' }}>
+      <canvas
+        ref={canvasRef}
+        style={{ width: '100%', height: '100%', display: 'block', cursor: selectMode ? 'crosshair' : 'grab' }}
+        onClick={handleClick}
+        onMouseDown={onMouseDown}
+        onMouseMove={onMouseMove}
+        onMouseUp={onMouseUp}
+        onMouseLeave={onLeave}
+        onContextMenu={onContextMenu}
+      />
+      {selectedNode && np && <NodeInfoCard node={selectedNode} sx={np.sx} sy={np.sy} onClose={() => setSelectedNode(null)} />}
+    </div>
+  )
+}
+
+// Small info card anchored at a clicked node: id, type, world position.
+function NodeInfoCard({ node, sx, sy, onClose }: { node: MapPoint; sx: number; sy: number; onClose: () => void }) {
+  const cls = node.cls === 'Charge' ? 'Charge' : node.cls === 'ActionPoint' ? 'Action Point' : 'Location Mark'
+  const accent = node.cls === 'Charge' ? '#b45309' : node.cls === 'ActionPoint' ? '#c2410c' : '#1d4ed8'
+  return (
+    <div onClick={e => e.stopPropagation()}
+      style={{ position: 'absolute', left: Math.max(6, sx + 12), top: Math.max(6, sy + 12), zIndex: 5,
+        minWidth: 150, background: '#ffffff', border: '1px solid #d4dae3', borderLeft: `3px solid ${accent}`,
+        borderRadius: 4, boxShadow: '0 4px 14px rgba(26,34,48,0.12)', padding: '8px 10px',
+        fontFamily: 'Inter, "Noto Sans JP", sans-serif', color: '#1a2230' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span style={{ fontFamily: 'Roboto Mono', fontSize: 13, fontWeight: 700, color: accent }}>{node.id}</span>
+        <button onClick={onClose} style={{ marginLeft: 'auto', background: 'transparent', border: 'none', color: '#94a3b4', cursor: 'pointer', fontSize: 15, lineHeight: 1 }}>×</button>
+      </div>
+      {node.name && node.name !== node.id && <div style={{ fontSize: 11, color: '#4a5568', marginTop: 1 }}>{node.name}</div>}
+      <div style={{ fontSize: 9, letterSpacing: 0.5, color: '#94a3b4', textTransform: 'uppercase', margin: '4px 0 3px' }}>{cls}</div>
+      <div style={{ fontFamily: 'Roboto Mono', fontSize: 11, color: '#1a2230', display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '1px 8px' }}>
+        <span style={{ color: '#64748b' }}>X</span><span>{node.x.toFixed(3)} m</span>
+        <span style={{ color: '#64748b' }}>Y</span><span>{node.y.toFixed(3)} m</span>
+        <span style={{ color: '#64748b' }}>θ</span><span>{node.theta.toFixed(1)}°</span>
+      </div>
+    </div>
   )
 }
 
@@ -177,9 +319,10 @@ function drawGrid(ctx: CanvasRenderingContext2D, w: number, h: number, t: Transf
 // (FULL = loaded green crate, EMPTY = grey outline crate). Toggle "Store" off
 // to reveal the node + its name underneath.
 const STORAGE_ICON = { EMPTY: '/assets/icons/storage_empty.svg', FULL: '/assets/icons/storage_full.svg' }
+const OCCUPY_ICON = '/assets/icons/occupy.png'
 const STORAGE_M = 1.6   // carton footprint in metres — scales true-to-map like robots
 
-function drawStorages(ctx: CanvasRenderingContext2D, map: FleetMap, storages: Storage[], t: Transform, cfg: MapViewConfig) {
+function drawStorages(ctx: CanvasRenderingContext2D, map: FleetMap, storages: Storage[], occupied: Set<string>, t: Transform, cfg: MapViewConfig) {
   // Proportional to the map (metres × zoom) so it tracks zoom smoothly, with a
   // small px floor so it stays visible when zoomed far out. No upper clamp.
   const sz = Math.max(14, STORAGE_M * t.scale)
@@ -203,6 +346,19 @@ function drawStorages(ctx: CanvasRenderingContext2D, map: FleetMap, storages: St
       ctx.strokeStyle = col; ctx.lineWidth = 1.5; ctx.fill(); ctx.stroke()
     }
 
+    // "occupy" marker overlaid on the crate when a running job reserves this
+    // pickup/dropoff point (centred, ~crate-sized).
+    if (occupied.has(s.id)) {
+      const bs = sz * 0.95
+      const oimg = getCachedImg(OCCUPY_ICON)
+      if (oimg.complete && oimg.naturalWidth > 0) {
+        ctx.drawImage(oimg, sx - bs / 2, sy - bs / 2, bs, bs)
+      } else {
+        ctx.beginPath(); ctx.arc(sx, sy, bs / 2, 0, Math.PI * 2)
+        ctx.fillStyle = 'rgba(34,211,238,0.85)'; ctx.fill()
+      }
+    }
+
     // name label above the icon (respect the label zoom threshold)
     if (t.scale >= cfg.labelZoomThreshold) {
       const lbl = s.name
@@ -218,32 +374,121 @@ function drawStorages(ctx: CanvasRenderingContext2D, map: FleetMap, storages: St
   }
 }
 
-function drawZones(ctx: CanvasRenderingContext2D, map: FleetMap, t: Transform, cfg: MapViewConfig) {
-  if (!cfg.showZones) return
-  for (const area of map.areas) {
-    if (!area.poly.length) continue
-    ctx.beginPath()
-    const { sx, sy } = worldToScreen(area.poly[0].x, area.poly[0].y, t)
-    ctx.moveTo(sx, sy)
-    for (let i = 1; i < area.poly.length; i++) {
-      const { sx: x2, sy: y2 } = worldToScreen(area.poly[i].x, area.poly[i].y, t)
-      ctx.lineTo(x2, y2)
+// Storage AREAS: a translucent bounding box around all member storage nodes,
+// so a batch pickup/drop group reads as one zone on the map.
+function drawAreas(ctx: CanvasRenderingContext2D, map: FleetMap, areas: StorageArea[], storages: Storage[], t: Transform, cfg: MapViewConfig) {
+  const pad = 2.0 // metres of padding so the box clears the crates
+  for (const a of areas) {
+    if (!a.enabled) continue
+    const members = storages.filter(s => s.areaId === a.id && s.enabled)
+    const pts = members.map(s => map.points.find(p => p.id === s.nodeId)).filter((p): p is MapPoint => !!p)
+    if (pts.length < 1) continue
+    const xs = pts.map(p => p.x), ys = pts.map(p => p.y)
+    const minX = Math.min(...xs) - pad, maxX = Math.max(...xs) + pad
+    const minY = Math.min(...ys) - pad, maxY = Math.max(...ys) + pad
+    const a1 = worldToScreen(minX, maxY, t)   // top-left (maxY = up)
+    const a2 = worldToScreen(maxX, minY, t)   // bottom-right
+    const x = a1.sx, y = a1.sy, w = a2.sx - a1.sx, h = a2.sy - a1.sy
+    const col = a.kind === 'PICK' ? '#2563eb' : a.kind === 'DROP' ? '#f59e0b' : '#7c3aed'
+    // soft fill + a clear solid rounded border
+    ctx.beginPath(); ctx.roundRect(x, y, w, h, 8)
+    ctx.fillStyle = col + '10'; ctx.fill()
+    ctx.strokeStyle = col; ctx.globalAlpha = 0.55; ctx.lineWidth = 2; ctx.setLineDash([7, 4]); ctx.stroke()
+    ctx.setLineDash([]); ctx.globalAlpha = 1
+
+    // name in a solid pill straddling the top-left corner (readable over content)
+    if (t.scale >= cfg.labelZoomThreshold) {
+      const lblPx = Math.max(9, cfg.labelSize - 1)
+      ctx.font = `bold ${lblPx}px Roboto Mono, "Noto Sans JP", monospace`
+      ctx.textAlign = 'left'; ctx.textBaseline = 'middle'
+      const text = `${a.name} · ${a.kind}`
+      const tw = ctx.measureText(text).width
+      const chipH = lblPx + 7, chipW = tw + 14
+      ctx.beginPath(); ctx.roundRect(x + 6, y - chipH / 2, chipW, chipH, 4)
+      ctx.fillStyle = col; ctx.fill()
+      ctx.fillStyle = '#ffffff'; ctx.fillText(text, x + 13, y + 0.5)
+      ctx.textBaseline = 'alphabetic'
     }
-    ctx.closePath()
-    ctx.fillStyle = 'rgba(37,99,235,0.06)'
-    ctx.strokeStyle = 'rgba(37,99,235,0.40)'
-    ctx.lineWidth = 1.4
-    ctx.fill(); ctx.stroke()
-    // bold zone title at the top-left corner (like the reference layout)
-    const minX = Math.min(...area.poly.map(p => p.x))
-    const maxY = Math.max(...area.poly.map(p => p.y))
-    const { sx: lx, sy: ly } = worldToScreen(minX, maxY, t)
-    ctx.font = `600 ${Math.max(11, Math.round(cfg.labelSize * 1.1))}px Inter, "Noto Sans JP", sans-serif`
-    ctx.textAlign = 'left'
-    ctx.fillStyle = '#334b73'
-    ctx.fillText(area.id, lx + 4, ly - 5)
   }
 }
+
+// TRAFFIC AREAS: operator-defined mutual-exclusion zones (red hatched box).
+function drawTrafficAreas(ctx: CanvasRenderingContext2D, map: FleetMap, zones: TrafficArea[], t: Transform, cfg: MapViewConfig) {
+  const pad = 1.2
+  for (const z of zones) {
+    if (!z.enabled) continue
+    const pts = z.nodeIds.map(id => map.points.find(p => p.id === id)).filter((p): p is MapPoint => !!p)
+    if (!pts.length) continue
+    const xs = pts.map(p => p.x), ys = pts.map(p => p.y)
+    const tl = worldToScreen(Math.min(...xs) - pad, Math.max(...ys) + pad, t)
+    const br = worldToScreen(Math.max(...xs) + pad, Math.min(...ys) - pad, t)
+    const x = tl.sx, y = tl.sy, w = br.sx - tl.sx, h = br.sy - tl.sy
+    const col = '#dc2626'
+    ctx.save()
+    ctx.beginPath(); ctx.roundRect(x, y, w, h, 5)
+    ctx.fillStyle = col + '12'; ctx.fill()
+    ctx.strokeStyle = col + '88'; ctx.lineWidth = 1.5; ctx.setLineDash([2, 4]); ctx.stroke(); ctx.setLineDash([])
+    ctx.restore()
+    if (t.scale >= cfg.labelZoomThreshold) {
+      ctx.font = `bold ${Math.max(8, cfg.labelSize - 2)}px Roboto Mono, "Noto Sans JP", monospace`
+      ctx.textAlign = 'left'; ctx.fillStyle = col
+      ctx.fillText(`⛒ ${z.name} ·${z.capacity}`, x + 4, y + h - 4)
+    }
+  }
+}
+
+// DOCKS: parking & charging points — a solid colour badge with a white glyph
+// (⚡ bolt for CHARGE, P for PARK) so they read clearly over the lanes/nodes.
+const DOCK_ICON = { PARK: '/assets/icons/standbyStation.svg', CHARGE: '/assets/icons/chargeStation.svg' }
+const DOCK_M = 1.6   // badge footprint in metres (scales true-to-map, with a floor)
+
+function drawDocks(ctx: CanvasRenderingContext2D, map: FleetMap, docks: Dock[], t: Transform) {
+  const sz = Math.max(18, DOCK_M * t.scale)
+  const half = sz / 2
+  const rad = sz * 0.28
+  for (const d of docks) {
+    if (!d.enabled) continue
+    const node = map.points.find(p => p.id === d.nodeId)
+    if (!node) continue
+    const { sx, sy } = worldToScreen(node.x, node.y, t)
+    const charge = d.type === 'CHARGE'
+    const col = charge ? '#ea7a00' : '#2563eb'
+
+    // colour badge with a drop shadow + white outline so it pops off the map
+    ctx.save()
+    ctx.shadowColor = 'rgba(0,0,0,0.30)'; ctx.shadowBlur = 4; ctx.shadowOffsetY = 1
+    ctx.beginPath(); ctx.roundRect(sx - half, sy - half, sz, sz, rad)
+    ctx.fillStyle = col; ctx.fill()
+    ctx.restore()
+    ctx.beginPath(); ctx.roundRect(sx - half, sy - half, sz, sz, rad)
+    ctx.strokeStyle = '#ffffff'; ctx.lineWidth = Math.max(1.2, sz * 0.07); ctx.stroke()
+
+    // white glyph centred (the SVGs are white-filled, made for a colour bg)
+    const g = getCachedImg(charge ? DOCK_ICON.CHARGE : DOCK_ICON.PARK)
+    const gs = sz * 0.6
+    if (g.complete && g.naturalWidth > 0) {
+      ctx.drawImage(g, sx - gs / 2, sy - gs / 2, gs, gs)
+    } else {
+      ctx.fillStyle = '#fff'; ctx.font = `bold ${sz * 0.55}px Roboto Mono, "Noto Sans JP", monospace`
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
+      ctx.fillText(charge ? '⚡' : 'P', sx, sy + 0.5); ctx.textBaseline = 'alphabetic'
+    }
+
+    // bound robot id under the badge
+    if (d.agvId) {
+      ctx.font = `bold ${Math.max(8, sz * 0.34)}px Roboto Mono, "Noto Sans JP", monospace`
+      ctx.textAlign = 'center'
+      const lw = ctx.measureText(d.agvId).width
+      const ly = sy + half + Math.max(9, sz * 0.34)
+      ctx.fillStyle = 'rgba(255,255,255,0.85)'; ctx.fillRect(sx - lw / 2 - 2, ly - Math.max(8, sz * 0.34), lw + 4, Math.max(10, sz * 0.4))
+      ctx.fillStyle = col; ctx.fillText(d.agvId, sx, ly)
+    }
+  }
+}
+
+// NB: map `advancedAreaList` (area-control zones) is intentionally NOT rendered
+// in the fleet view — area control + AMR-area mapping is handled by the robots'
+// low-level controller, not this dashboard.
 
 // A small triangular arrowhead at (x,y) pointing along `angle` (canvas radians).
 function drawArrowhead(ctx: CanvasRenderingContext2D, x: number, y: number, angle: number, size: number, color: string) {
@@ -289,40 +534,41 @@ function drawAxes(ctx: CanvasRenderingContext2D, t: Transform) {
 
 function drawEdges(ctx: CanvasRenderingContext2D, map: FleetMap, t: Transform, cfg: MapViewConfig) {
   if (!cfg.showEdges) return
-  const lw = Math.max(0.6, t.scale * 0.16)
+  const lw = Math.max(0.5, t.scale * 0.11)
+  const EDGE = 'rgba(140,168,201,0.85)'   // soft steel-blue lane
   for (const c of map.curves) {
     const { sx: ax, sy: ay } = worldToScreen(c.sx, c.sy, t)
     const { sx: bx, sy: by } = worldToScreen(c.ex, c.ey, t)
     if (Math.max(ax, bx) < -10 || Math.min(ax, bx) > ctx.canvas.width + 10) continue
-    ctx.beginPath(); ctx.lineWidth = lw
+    ctx.beginPath(); ctx.lineWidth = lw; ctx.strokeStyle = EDGE; ctx.setLineDash([])
     if (c.type === 'bezier' && c.cp.length >= 2) {
-      ctx.strokeStyle = 'rgba(37,99,235,0.55)'; ctx.setLineDash([])
       const { sx: c1x, sy: c1y } = worldToScreen(c.cp[0].x, c.cp[0].y, t)
       const { sx: c2x, sy: c2y } = worldToScreen(c.cp[1].x, c.cp[1].y, t)
       ctx.moveTo(ax, ay); ctx.bezierCurveTo(c1x, c1y, c2x, c2y, bx, by)
     } else if (c.type === 'bezier' && c.cp.length === 1) {
-      ctx.strokeStyle = 'rgba(37,99,235,0.55)'; ctx.setLineDash([])
       const { sx: cpx, sy: cpy } = worldToScreen(c.cp[0].x, c.cp[0].y, t)
       ctx.moveTo(ax, ay); ctx.quadraticCurveTo(cpx, cpy, bx, by)
     } else {
-      ctx.strokeStyle = 'rgba(37,99,235,0.55)'; ctx.setLineDash([])
       ctx.moveTo(ax, ay); ctx.lineTo(bx, by)
     }
     ctx.stroke()
 
-    // direction arrow at the edge midpoint (travel is always sNode→eNode)
-    if (t.scale >= 3) {
+    // direction arrow at the edge midpoint (travel is always sNode→eNode);
+    // size scales with zoom like the nodes/labels (hidden in far overview)
+    if (t.scale >= 2.5) {
       const wm = curveWorld(c, 0.5), wn = curveWorld(c, 0.54)
       const m = worldToScreen(wm.x, wm.y, t), n = worldToScreen(wn.x, wn.y, t)
       const ang = Math.atan2(n.sy - m.sy, n.sx - m.sx)
-      drawArrowhead(ctx, m.sx, m.sy, ang, Math.min(5, Math.max(3, t.scale * 0.5)), 'rgba(37,99,235,0.85)')
+      drawArrowhead(ctx, m.sx, m.sy, ang, Math.max(2, Math.min(7, t.scale * 0.42)), 'rgba(63,127,200,0.9)')
     }
   }
   ctx.setLineDash([])
 }
 
 function drawNodes(ctx: CanvasRenderingContext2D, map: FleetMap, t: Transform, cfg: MapViewConfig, hiddenNodes: Set<string>) {
-  const r = cfg.nodeSize
+  // Dot radius scales with zoom (tiny in the overview, larger when zoomed in);
+  // the "Node px" slider nudges it around the default of 3.
+  const r = Math.max(1.2, Math.min(9, t.scale * 0.4 * (cfg.nodeSize / 3)))
   const showLbl = t.scale >= cfg.labelZoomThreshold
   // first pass: dots; second pass: labels with collision-skip so dense
   // clusters don't turn into an unreadable pile of overlapping text.
@@ -349,17 +595,20 @@ function drawNodes(ctx: CanvasRenderingContext2D, map: FleetMap, t: Transform, c
     visible.push({ p, sx, sy })
   }
   if (!showLbl) return
-  ctx.font = `${cfg.labelSize}px Roboto Mono, "Noto Sans JP", monospace`
+  // Label size grows with zoom: tiny in the overview, detailed when zoomed in
+  // (capped at the toolbar "Label px"). Keeps the big picture uncluttered.
+  const lblPx = Math.max(6, Math.min(cfg.labelSize, Math.round(t.scale * 1.0)))
+  ctx.font = `${lblPx}px Roboto Mono, "Noto Sans JP", monospace`
   ctx.textAlign = 'center'
   for (const { p, sx, sy } of visible) {
     const tw = ctx.measureText(p.id).width
-    const ly = sy + r + cfg.labelSize + 1
-    const box = { x1: sx - tw / 2 - 1, y1: ly - cfg.labelSize + 1, x2: sx + tw / 2 + 1, y2: ly + 2 }
+    const ly = sy + r + lblPx + 1
+    const box = { x1: sx - tw / 2 - 1, y1: ly - lblPx + 1, x2: sx + tw / 2 + 1, y2: ly + 2 }
     // skip labels that would overlap one already drawn (declutters clusters)
     if (placed.some(q => box.x1 < q.x2 && box.x2 > q.x1 && box.y1 < q.y2 && box.y2 > q.y1)) continue
     placed.push(box)
-    ctx.fillStyle = 'rgba(255,255,255,0.92)'
-    ctx.fillRect(box.x1, box.y1, tw + 2, cfg.labelSize + 1)
+    ctx.fillStyle = 'rgba(255,255,255,0.9)'
+    ctx.fillRect(box.x1, box.y1, tw + 2, lblPx + 1)
     ctx.fillStyle = p.cls === 'Charge' ? '#b45309' : p.cls === 'ActionPoint' ? '#c2410c' : '#1d4ed8'
     ctx.fillText(p.id, sx, ly)
   }
@@ -440,6 +689,24 @@ function drawRobot(ctx: CanvasRenderingContext2D, r: Robot, t: Transform, cfg: M
     ctx.fill(); ctx.stroke()
   }
   ctx.restore()
+  // Carried load: an orange cargo box on the robot's deck, drawn pick → drop.
+  // Spec (AGV_CARGO_HANDOFF): 0.9 m square, +0.15 m Y offset in the robot's
+  // local frame, rotates with the robot heading, fill #de8d36 @ 0.9.
+  if (r.carrying) {
+    const CARGO = { size: 1.29, offsetX: 0, offsetY: 0.15 }  // metres (0.9 +~43%)
+    const cs = Math.max(8, CARGO.size * t.scale)
+    const ox = CARGO.offsetX * t.scale, oy = CARGO.offsetY * t.scale
+    ctx.save()
+    ctx.translate(sx, sy)
+    ctx.rotate(thetaToScreenRot(r.pose.theta))   // same rotation as the robot icon
+    ctx.shadowColor = 'rgba(0,0,0,0.30)'; ctx.shadowBlur = 3; ctx.shadowOffsetY = 1
+    ctx.beginPath(); ctx.roundRect(-cs / 2 + ox, -cs / 2 + oy, cs, cs, Math.max(1, cs * 0.12))
+    ctx.fillStyle = 'rgba(222,141,54,0.9)'       // #de8d36
+    ctx.fill()
+    ctx.shadowColor = 'transparent'
+    ctx.strokeStyle = '#b9701f'; ctx.lineWidth = Math.max(0.6, cs * 0.06); ctx.stroke()
+    ctx.restore()
+  }
   // Label (in the identity colour)
   const lblSz = Math.max(8, cfg.labelSize - 1)
   ctx.font = `bold ${lblSz}px Roboto Mono, "Noto Sans JP", monospace`; ctx.textAlign = 'center'

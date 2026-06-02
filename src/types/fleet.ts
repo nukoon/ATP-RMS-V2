@@ -67,9 +67,44 @@ export interface Storage {
   name: string                // referenced by missions, e.g. ST-A1
   nodeId: string              // bound map location node id
   mapId?: string | null
+  areaId?: string | null      // optional group for batch pickup/drop
   kind: StorageKind
   state: StorageState
   label?: string
+  enabled: boolean
+}
+
+// ── Storage areas: a named group of storages handled as a batch ──
+export interface StorageArea {
+  id: string
+  name: string
+  kind: StorageKind           // PICK / DROP / BOTH
+  mapId?: string | null
+  enabled: boolean
+}
+
+// ── Traffic areas: operator-defined mutual-exclusion zones ──
+// At most `capacity` AMRs may be inside the node set at once; others wait
+// outside (no reversing). Used where automatic routing can't resolve a jam.
+export interface TrafficArea {
+  id: string
+  name: string
+  nodeIds: string[]
+  capacity: number
+  mapId?: string | null
+  enabled: boolean
+}
+
+// ── Docks: parking & charging points (optionally bound to a robot) ──
+export type DockType = 'PARK' | 'CHARGE'
+
+export interface Dock {
+  id: string
+  name: string
+  nodeId: string              // bound map node id
+  type: DockType
+  agvId?: string | null       // bound robot runtime id/serial (e.g. ATP-01)
+  mapId?: string | null
   enabled: boolean
 }
 

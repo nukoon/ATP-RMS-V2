@@ -10,9 +10,9 @@
 import { useEffect, useState } from 'react'
 import { useStorageStore } from '@/store/storage.store'
 import { useFleetStore } from '@/store/fleet.store'
-import type { ActionStage, ActionParam, StorageActionBinding, VdaActionTemplate } from '@/types/fleet'
+import type { ActionStage, ActionParam, StorageActionBinding, VdaActionTemplate, StorageKind } from '@/types/fleet'
 
-type Tab = 'storages' | 'actions'
+type Tab = 'storages' | 'areas' | 'actions'
 
 export function StorageDialog({ onClose }: { onClose: () => void }) {
   const [tab, setTab] = useState<Tab>('storages')
@@ -20,11 +20,11 @@ export function StorageDialog({ onClose }: { onClose: () => void }) {
     <div onClick={onClose} style={ovl}>
       <div onClick={e => e.stopPropagation()} style={panel}>
         <div style={{ display: 'flex', alignItems: 'center', padding: '10px 14px', borderBottom: '1px solid #d4dae3' }}>
-          <span style={{ fontFamily: 'Roboto Mono', fontSize: 11, letterSpacing: 2, color: '#2563eb' }}>STORAGE &amp; ACTIONS</span>
+          <span style={{ fontFamily: 'Roboto Mono', fontSize: 11, letterSpacing: 2, color: '#2563eb' }}>STORAGE · AREAS · ACTIONS</span>
           <button onClick={onClose} style={{ marginLeft: 'auto', background: 'transparent', border: 'none', color: '#64748b', cursor: 'pointer', fontSize: 18 }}>×</button>
         </div>
         <div style={{ display: 'flex', borderBottom: '1px solid #d4dae3' }}>
-          {([['storages', 'STORAGES'], ['actions', 'ACTION TEMPLATES']] as [Tab, string][]).map(([k, l]) => (
+          {([['storages', 'STORAGES'], ['areas', 'AREAS'], ['actions', 'ACTIONS']] as [Tab, string][]).map(([k, l]) => (
             <button key={k} onClick={() => setTab(k)}
               style={{ flex: 1, padding: '8px 0', fontSize: 10, fontWeight: 600, letterSpacing: 1, cursor: 'pointer', fontFamily: 'Inter, "Noto Sans JP", sans-serif',
                 background: tab === k ? 'rgba(37,99,235,0.08)' : 'transparent', color: tab === k ? '#2563eb' : '#64748b',
@@ -32,7 +32,9 @@ export function StorageDialog({ onClose }: { onClose: () => void }) {
           ))}
         </div>
         <div style={{ overflowY: 'auto', padding: 14 }}>
-          {tab === 'storages' ? <StoragesTab /> : <ActionsTab />}
+          {tab === 'storages' && <StoragesTab />}
+          {tab === 'areas'    && <AreasTab />}
+          {tab === 'actions'  && <ActionsTab />}
         </div>
       </div>
     </div>
@@ -41,7 +43,7 @@ export function StorageDialog({ onClose }: { onClose: () => void }) {
 
 // ── Storages tab: bind PICK/DROP action sequences ──────────
 function StoragesTab() {
-  const { storages, templates, loadBindings, saveBindings, updateStorage } = useStorageStore()
+  const { storages, areas, templates, loadBindings, saveBindings, updateStorage } = useStorageStore()
   const map = useFleetStore(s => s.map)
   const nodes = (map?.points ?? []).filter(p => p.cls !== 'Charge')
   const [sel, setSel] = useState('')
@@ -98,6 +100,12 @@ function StoragesTab() {
           <div><Lbl>State</Lbl>
             <select value={storage.state} onChange={e => updateStorage(storage.id, { state: e.target.value as never })} style={inp}>
               <option>EMPTY</option><option>FULL</option>
+            </select>
+          </div>
+          <div style={{ gridColumn: '1 / -1' }}><Lbl>Area (batch group)</Lbl>
+            <select value={storage.areaId ?? ''} onChange={e => updateStorage(storage.id, { areaId: e.target.value || null })} style={inp}>
+              <option value="">— none —</option>
+              {areas.map(a => <option key={a.id} value={a.id}>{a.name} ({a.kind})</option>)}
             </select>
           </div>
         </div>
@@ -168,6 +176,59 @@ function StageEditor({ title, stage, list, setList, templates }:
 
 function editParam(_b: StorageActionBinding, i: number, pi: number, patch: Partial<ActionParam>, params: ActionParam[], upd: (i: number, patch: Partial<StorageActionBinding>) => void) {
   upd(i, { params: params.map((p, k) => k === pi ? { ...p, ...patch } : p) })
+}
+
+// ── Areas tab: group storages for batch pickup/drop ─────────
+function AreasTab() {
+  const { areas, storages, addArea, updateArea, removeArea, setAreaState } = useStorageStore()
+  const [name, setName] = useState('')
+  const [kind, setKind] = useState<StorageKind>('BOTH')
+  const [err, setErr] = useState('')
+
+  const create = async () => {
+    if (!name.trim()) return
+    setErr('')
+    try { await addArea({ name: name.trim(), kind, enabled: true }); setName('') }
+    catch (e) { setErr(e instanceof Error ? e.message : 'failed') }
+  }
+  const memberCount = (areaId: string) => storages.filter(s => s.areaId === areaId).length
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 110px auto', gap: 6, alignItems: 'end' }}>
+        <div><Lbl>Area name</Lbl><input value={name} onChange={e => setName(e.target.value)} placeholder="ZONE-A" style={inp} /></div>
+        <div><Lbl>Kind</Lbl>
+          <select value={kind} onChange={e => setKind(e.target.value as StorageKind)} style={inp}>
+            <option>PICK</option><option>DROP</option><option>BOTH</option>
+          </select>
+        </div>
+        <button onClick={create} style={primaryBtn}>+ ADD</button>
+      </div>
+      {err && <div style={{ fontSize: 10, color: '#dc2626' }}>{err}</div>}
+
+      <div style={{ borderTop: '1px solid #d4dae3', paddingTop: 8 }}>
+        <Lbl>Areas ({areas.length})</Lbl>
+        {areas.length === 0 && <div style={{ fontSize: 10, color: '#94a3b4' }}>No areas yet — add one above, then assign storages to it in the STORAGES tab.</div>}
+        {areas.map(a => (
+          <div key={a.id} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 0', borderBottom: '1px solid rgba(212,218,227,0.6)', fontSize: 11 }}>
+            <span style={{ fontFamily: 'Roboto Mono', color: '#2563eb', flex: 1 }}>{a.name}</span>
+            <span style={{ fontSize: 9, color: '#64748b' }}>{memberCount(a.id)}</span>
+            {/* batch fill/empty all members in this area */}
+            <button onClick={() => setAreaState(a.id, 'FULL').catch(() => {})} disabled={!memberCount(a.id)} title="Set all members FULL"
+              style={{ ...miniBtn, color: '#16a34a', borderColor: 'rgba(22,163,74,0.4)' }}>ALL FULL</button>
+            <button onClick={() => setAreaState(a.id, 'EMPTY').catch(() => {})} disabled={!memberCount(a.id)} title="Set all members EMPTY"
+              style={{ ...miniBtn, color: '#64748b' }}>ALL EMPTY</button>
+            <select value={a.kind} onChange={e => updateArea(a.id, { kind: e.target.value as StorageKind }).catch(() => {})} style={{ ...inp, width: 72 }}>
+              <option>PICK</option><option>DROP</option><option>BOTH</option>
+            </select>
+            <button onClick={() => updateArea(a.id, { enabled: !a.enabled }).catch(() => {})}
+              style={{ ...miniBtn, color: a.enabled ? '#16a34a' : '#94a3b4' }}>{a.enabled ? 'ON' : 'OFF'}</button>
+            <button onClick={() => removeArea(a.id).catch(() => {})} style={{ ...miniBtn, color: '#dc2626' }}>×</button>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
 }
 
 // ── Action templates tab ───────────────────────────────────

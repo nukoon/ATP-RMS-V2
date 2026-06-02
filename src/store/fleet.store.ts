@@ -29,6 +29,7 @@ interface FleetStore {
   upsertRobot: (robot: Robot) => void
   updateFromVDA5050: (robotId: string, state: VDA5050State) => void
   setRobotPath: (robotId: string, path: string[]) => void
+  setRobotCarrying: (robotId: string, carrying: boolean) => void
 
   // Orders
   orders:      FleetOrder[]
@@ -127,6 +128,14 @@ export const useFleetStore = create<FleetStore>()(
       if (existing.path.length === path.length && existing.path.every((n, i) => n === path[i])) return s
       const robots = new Map(s.robots)
       robots.set(robotId, { ...existing, path })
+      return { robots }
+    }),
+
+    setRobotCarrying: (robotId, carrying) => set(s => {
+      const existing = s.robots.get(robotId)
+      if (!existing || !!existing.carrying === carrying) return s
+      const robots = new Map(s.robots)
+      robots.set(robotId, { ...existing, carrying })
       return { robots }
     }),
 
