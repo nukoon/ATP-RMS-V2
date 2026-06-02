@@ -2,7 +2,7 @@
  * MapCanvas — Main 2D fleet map renderer (Canvas API)
  * Draws: grid, zones, edges (bezier+line), nodes, robot paths, robots
  */
-import { useEffect, useRef, useCallback, useState } from 'react'
+import { useEffect, useRef, useCallback, useState, type ReactNode } from 'react'
 import type { FleetMap, Robot, MapViewConfig, MapPoint } from '@/types'
 import type { Storage, Dock, StorageArea, TrafficArea } from '@/types/fleet'
 import type { Transform } from '@/utils/canvas'
@@ -276,6 +276,7 @@ export function MapCanvas({ map, robots, config, selectedRobotId, onRobotClick, 
         onContextMenu={onContextMenu}
       />
       {selectedNode && np && <NodeInfoCard node={selectedNode} sx={np.sx} sy={np.sy} onClose={() => setSelectedNode(null)} />}
+      <ZoomControl ctrl={ctrl} />
     </div>
   )
 }
@@ -284,23 +285,73 @@ export function MapCanvas({ map, robots, config, selectedRobotId, onRobotClick, 
 function NodeInfoCard({ node, sx, sy, onClose }: { node: MapPoint; sx: number; sy: number; onClose: () => void }) {
   const cls = node.cls === 'Charge' ? 'Charge' : node.cls === 'ActionPoint' ? 'Action Point' : 'Location Mark'
   const accent = node.cls === 'Charge' ? '#b45309' : node.cls === 'ActionPoint' ? '#c2410c' : '#1d4ed8'
+  const [closeHover, setCloseHover] = useState(false)
   return (
     <div onClick={e => e.stopPropagation()}
-      style={{ position: 'absolute', left: Math.max(6, sx + 12), top: Math.max(6, sy + 12), zIndex: 5,
-        minWidth: 150, background: '#ffffff', border: '1px solid #d4dae3', borderLeft: `3px solid ${accent}`,
-        borderRadius: 4, boxShadow: '0 4px 14px rgba(26,34,48,0.12)', padding: '8px 10px',
+      style={{ position: 'absolute', left: Math.max(6, sx + 14), top: Math.max(6, sy + 14), zIndex: 6,
+        minWidth: 168, background: '#ffffff', border: '1px solid #d4dae3',
+        borderRadius: 8, boxShadow: '0 8px 24px rgba(26,34,48,0.14)', padding: '9px 11px 10px',
         fontFamily: 'Inter, "Noto Sans JP", sans-serif', color: '#1a2230' }}>
+      {/* class chip (dot + label, not a colored side-stripe) + close */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <span style={{ fontFamily: 'Roboto Mono', fontSize: 13, fontWeight: 700, color: accent }}>{node.id}</span>
-        <button onClick={onClose} style={{ marginLeft: 'auto', background: 'transparent', border: 'none', color: '#94a3b4', cursor: 'pointer', fontSize: 15, lineHeight: 1 }}>×</button>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 9, fontWeight: 700,
+          letterSpacing: 0.6, textTransform: 'uppercase', color: accent,
+          background: accent + '14', border: `1px solid ${accent}33`, borderRadius: 5, padding: '2px 7px' }}>
+          <span style={{ width: 6, height: 6, borderRadius: '50%', background: accent }} />
+          {cls}
+        </span>
+        <button onClick={onClose} aria-label="Close"
+          onMouseEnter={() => setCloseHover(true)} onMouseLeave={() => setCloseHover(false)}
+          onFocus={() => setCloseHover(true)} onBlur={() => setCloseHover(false)}
+          style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', justifyContent: 'center',
+            width: 20, height: 20, borderRadius: 5, border: 'none', cursor: 'pointer', outline: 'none',
+            color: closeHover ? '#dc2626' : '#94a3b4', background: closeHover ? 'rgba(220,38,38,0.08)' : 'transparent',
+            fontSize: 15, lineHeight: 1, transition: 'background 130ms ease, color 130ms ease' }}>×</button>
       </div>
+      <div style={{ fontFamily: 'Roboto Mono', fontSize: 14, fontWeight: 700, color: '#1a2230', marginTop: 7 }}>{node.id}</div>
       {node.name && node.name !== node.id && <div style={{ fontSize: 11, color: '#4a5568', marginTop: 1 }}>{node.name}</div>}
-      <div style={{ fontSize: 9, letterSpacing: 0.5, color: '#94a3b4', textTransform: 'uppercase', margin: '4px 0 3px' }}>{cls}</div>
-      <div style={{ fontFamily: 'Roboto Mono', fontSize: 11, color: '#1a2230', display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '1px 8px' }}>
+      <div style={{ height: 1, background: '#eef1f5', margin: '8px 0 7px' }} />
+      <div style={{ fontFamily: 'Roboto Mono', fontSize: 11, color: '#1a2230', display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '3px 10px' }}>
         <span style={{ color: '#64748b' }}>X</span><span>{node.x.toFixed(3)} m</span>
         <span style={{ color: '#64748b' }}>Y</span><span>{node.y.toFixed(3)} m</span>
         <span style={{ color: '#64748b' }}>θ</span><span>{node.theta.toFixed(1)}°</span>
       </div>
+    </div>
+  )
+}
+
+// Floating zoom control overlaid on the map (bottom-right), Google-Maps style:
+// segmented in / out / fit stack plus a live scale readout.
+const zoomIconProps = { width: 16, height: 16, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const }
+function ZoomBtn({ icon, onClick, title }: { icon: ReactNode; onClick: () => void; title: string }) {
+  const [hover, setHover] = useState(false)
+  return (
+    <button type="button" onClick={onClick} title={title} aria-label={title}
+      onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
+      onFocus={() => setHover(true)} onBlur={() => setHover(false)}
+      style={{ width: 32, height: 30, display: 'flex', alignItems: 'center', justifyContent: 'center',
+        border: 'none', padding: 0, cursor: 'pointer', outline: 'none',
+        color: hover ? '#2563eb' : '#4a5568', background: hover ? '#eef4ff' : '#ffffff',
+        transition: 'background 140ms ease, color 140ms ease' }}>
+      {icon}
+    </button>
+  )
+}
+function ZoomControl({ ctrl }: { ctrl: ReturnType<typeof useMapTransform> }) {
+  return (
+    <div style={{ position: 'absolute', right: 14, bottom: 14, zIndex: 6, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, userSelect: 'none' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', background: '#ffffff', border: '1px solid #d4dae3',
+        borderRadius: 9, boxShadow: '0 4px 16px rgba(26,34,48,0.14)', overflow: 'hidden' }}>
+        <ZoomBtn title="Zoom in" onClick={ctrl.zoomIn} icon={<svg {...zoomIconProps}><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>} />
+        <div style={{ height: 1, background: '#e7ebf1' }} />
+        <ZoomBtn title="Zoom out" onClick={ctrl.zoomOut} icon={<svg {...zoomIconProps}><line x1="5" y1="12" x2="19" y2="12" /></svg>} />
+        <div style={{ height: 1, background: '#e7ebf1' }} />
+        <ZoomBtn title="Fit to view" onClick={() => ctrl.fitToCanvas()} icon={<svg {...zoomIconProps}><path d="M8 3H5a2 2 0 0 0-2 2v3" /><path d="M21 8V5a2 2 0 0 0-2-2h-3" /><path d="M3 16v3a2 2 0 0 0 2 2h3" /><path d="M16 21h3a2 2 0 0 0 2-2v-3" /></svg>} />
+      </div>
+      <span style={{ fontFamily: 'Roboto Mono, "Noto Sans JP", monospace', fontSize: 10, color: '#4a5568',
+        background: 'rgba(255,255,255,0.88)', padding: '1px 6px', borderRadius: 5, border: '1px solid #e7ebf1' }}>
+        {ctrl.transform.scale.toFixed(2)}×
+      </span>
     </div>
   )
 }

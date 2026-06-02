@@ -166,9 +166,8 @@ export default function App() {
 
       {/* TOOLBAR */}
       <MapToolbar
-        config={mapConfig} zoom={ctrl.transform.scale}
+        config={mapConfig}
         onChange={setMapConfig}
-        onZoomIn={ctrl.zoomIn} onZoomOut={ctrl.zoomOut} onFit={ctrl.fitToCanvas}
         onManageFacilities={() => setShowFacilities(true)}
         onOpenDashboard={() => setShowDashboard(true)}
         onOpenHistory={() => setShowHistory(true)}
