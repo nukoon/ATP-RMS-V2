@@ -128,12 +128,19 @@ function AmrTab() {
         {!amrsLoaded && <div style={{ fontSize: 10, color: '#94a3b4', padding: '6px 0' }}>Loading…</div>}
         {amrsLoaded && amrs.length === 0 && <div style={{ fontSize: 10, color: '#94a3b4', padding: '6px 0' }}>None yet — add a robot above to connect to it.</div>}
         {amrs.map(a => (
-          <div key={a.serial} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 0', borderBottom: '1px solid rgba(212,218,227,0.5)', fontSize: 11 }}>
+          <div key={a.serial} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', borderBottom: '1px solid rgba(212,218,227,0.5)', fontSize: 11 }}>
             <input type="checkbox" checked={a.enabled} onChange={e => { updateAmr(a.serial, { enabled: e.target.checked }).catch(onErr) }} style={{ accentColor: '#2563eb' }} />
-            <span style={{ width: 8, height: 8, borderRadius: '50%', background: a.color }} />
-            <span style={{ fontFamily: 'Roboto Mono', color: '#2563eb', width: 80 }}>{a.serial}</span>
-            <span style={{ color: '#64748b', width: 54 }}>{a.model}</span>
-            <span style={{ fontFamily: 'Roboto Mono', color: '#4a5568', flex: 1 }}>{a.ip || '—'}</span>
+            <span style={{ fontFamily: 'Roboto Mono', color: '#1a2230', width: 70 }}>{a.serial}</span>
+            <span style={{ color: '#64748b', width: 48 }}>{a.model}</span>
+            {/* per-AMR identity colour — click a swatch to change it */}
+            <span style={{ display: 'flex', gap: 2 }}>
+              {COLORS.map(c => (
+                <button key={c} title="set colour" onClick={() => { updateAmr(a.serial, { color: c }).catch(onErr) }}
+                  style={{ width: 13, height: 13, borderRadius: '50%', background: c, cursor: 'pointer', padding: 0,
+                    border: a.color === c ? '2px solid #1a2230' : '1px solid #d4dae3' }} />
+              ))}
+            </span>
+            <span style={{ fontFamily: 'Roboto Mono', color: '#4a5568', flex: 1, textAlign: 'right' }}>{a.ip || '—'}</span>
             <button onClick={() => { removeAmr(a.serial).catch(onErr) }} style={{ background: 'transparent', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: 14 }}>×</button>
           </div>
         ))}

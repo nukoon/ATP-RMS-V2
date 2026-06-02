@@ -63,7 +63,7 @@ export const DEFAULT_MAP_CONFIG = {
   showPaths: true,
   showTheta: false,
   showStorage: true,
-  nodeSize: 4,
+  nodeSize: 3,
   labelSize: 11,
   labelZoomThreshold: 1.5,
   robotSize: 2.0,            // metres (true-to-scale footprint length)

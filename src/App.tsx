@@ -76,7 +76,7 @@ export default function App() {
     const store = useFleetStore.getState()
     for (const a of enabled) {
       store.upsertRobot({
-        id: a.serial, model: a.model, status: 'UNKNOWN',
+        id: a.serial, model: a.model, color: a.color, status: 'UNKNOWN',
         pose: { x: 0, y: 0, theta: 0, mapId: 'live' },
         battery: { batteryCharge: 0, charging: false },
         velocity: { vx: 0, vy: 0, omega: 0 },

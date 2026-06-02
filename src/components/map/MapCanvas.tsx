@@ -78,6 +78,7 @@ export function MapCanvas({ map, robots, config, selectedRobotId, onRobotClick, 
 
     drawGrid(ctx, canvas.width, canvas.height, tt)
     drawZones(ctx, map, tt, config)
+    drawAxes(ctx, tt)
     drawEdges(ctx, map, tt, config)
     robots.forEach(r => drawRobotPath(ctx, map, r, tt, config))
     // when storage is shown, its icon stands in for the bound node (hide that node)
@@ -229,25 +230,66 @@ function drawZones(ctx: CanvasRenderingContext2D, map: FleetMap, t: Transform, c
       ctx.lineTo(x2, y2)
     }
     ctx.closePath()
-    ctx.fillStyle = 'rgba(37,99,235,0.05)'
-    ctx.strokeStyle = 'rgba(37,99,235,0.30)'
-    ctx.lineWidth = 1.2
+    ctx.fillStyle = 'rgba(37,99,235,0.06)'
+    ctx.strokeStyle = 'rgba(37,99,235,0.40)'
+    ctx.lineWidth = 1.4
     ctx.fill(); ctx.stroke()
-    if (t.scale > 0.8) {
-      const cx = area.poly.reduce((s, p) => s + p.x, 0) / area.poly.length
-      const cy = area.poly.reduce((s, p) => s + p.y, 0) / area.poly.length
-      const { sx: lx, sy: ly } = worldToScreen(cx, cy, t)
-      ctx.font = `${Math.round(cfg.labelSize * 0.85)}px Inter, "Noto Sans JP", sans-serif`
-      ctx.fillStyle = 'rgba(37,99,235,0.45)'
-      ctx.textAlign = 'center'
-      ctx.fillText(area.id, lx, ly)
-    }
+    // bold zone title at the top-left corner (like the reference layout)
+    const minX = Math.min(...area.poly.map(p => p.x))
+    const maxY = Math.max(...area.poly.map(p => p.y))
+    const { sx: lx, sy: ly } = worldToScreen(minX, maxY, t)
+    ctx.font = `600 ${Math.max(11, Math.round(cfg.labelSize * 1.1))}px Inter, "Noto Sans JP", sans-serif`
+    ctx.textAlign = 'left'
+    ctx.fillStyle = '#334b73'
+    ctx.fillText(area.id, lx + 4, ly - 5)
   }
+}
+
+// A small triangular arrowhead at (x,y) pointing along `angle` (canvas radians).
+function drawArrowhead(ctx: CanvasRenderingContext2D, x: number, y: number, angle: number, size: number, color: string) {
+  ctx.save()
+  ctx.translate(x, y); ctx.rotate(angle)
+  ctx.beginPath()
+  ctx.moveTo(size, 0)
+  ctx.lineTo(-size * 0.7, size * 0.7)
+  ctx.lineTo(-size * 0.7, -size * 0.7)
+  ctx.closePath()
+  ctx.fillStyle = color; ctx.fill()
+  ctx.restore()
+}
+
+// World point on a curve at parameter t (line or bezier), for arrow placement.
+function curveWorld(c: FleetMap['curves'][number], t: number): { x: number; y: number } {
+  if (c.type === 'bezier' && c.cp.length >= 2) {
+    const u = 1 - t, a = u * u * u, b = 3 * u * u * t, d = 3 * u * t * t, e = t * t * t
+    return { x: a * c.sx + b * c.cp[0].x + d * c.cp[1].x + e * c.ex, y: a * c.sy + b * c.cp[0].y + d * c.cp[1].y + e * c.ey }
+  }
+  if (c.type === 'bezier' && c.cp.length === 1) {
+    const u = 1 - t
+    return { x: u * u * c.sx + 2 * u * t * c.cp[0].x + t * t * c.ex, y: u * u * c.sy + 2 * u * t * c.cp[0].y + t * t * c.ey }
+  }
+  return { x: c.sx + (c.ex - c.sx) * t, y: c.sy + (c.ey - c.sy) * t }
+}
+
+// Red +X / green +Y axes at the world origin (matches the reference frame marker).
+function drawAxes(ctx: CanvasRenderingContext2D, t: Transform) {
+  const o = worldToScreen(0, 0, t)
+  const len = Math.max(34, Math.min(70, t.scale * 14))
+  ctx.lineWidth = 2.5; ctx.setLineDash([])
+  // +X (east) → right, red
+  ctx.strokeStyle = '#e0492f'; ctx.beginPath(); ctx.moveTo(o.sx, o.sy); ctx.lineTo(o.sx + len, o.sy); ctx.stroke()
+  drawArrowhead(ctx, o.sx + len, o.sy, 0, 6, '#e0492f')
+  // +Y (north) → up, green
+  ctx.strokeStyle = '#2fa84a'; ctx.beginPath(); ctx.moveTo(o.sx, o.sy); ctx.lineTo(o.sx, o.sy - len); ctx.stroke()
+  drawArrowhead(ctx, o.sx, o.sy - len, -Math.PI / 2, 6, '#2fa84a')
+  ctx.font = '600 12px Inter, "Noto Sans JP", sans-serif'; ctx.textAlign = 'left'
+  ctx.fillStyle = '#e0492f'; ctx.fillText('X', o.sx + len + 3, o.sy + 4)
+  ctx.fillStyle = '#2fa84a'; ctx.fillText('Y', o.sx + 4, o.sy - len - 3)
 }
 
 function drawEdges(ctx: CanvasRenderingContext2D, map: FleetMap, t: Transform, cfg: MapViewConfig) {
   if (!cfg.showEdges) return
-  const lw = Math.max(1.2, t.scale * 0.45)
+  const lw = Math.max(0.6, t.scale * 0.16)
   for (const c of map.curves) {
     const { sx: ax, sy: ay } = worldToScreen(c.sx, c.sy, t)
     const { sx: bx, sy: by } = worldToScreen(c.ex, c.ey, t)
@@ -263,10 +305,18 @@ function drawEdges(ctx: CanvasRenderingContext2D, map: FleetMap, t: Transform, c
       const { sx: cpx, sy: cpy } = worldToScreen(c.cp[0].x, c.cp[0].y, t)
       ctx.moveTo(ax, ay); ctx.quadraticCurveTo(cpx, cpy, bx, by)
     } else {
-      ctx.strokeStyle = 'rgba(100,116,139,0.6)'; ctx.setLineDash([3, 3])
+      ctx.strokeStyle = 'rgba(37,99,235,0.55)'; ctx.setLineDash([])
       ctx.moveTo(ax, ay); ctx.lineTo(bx, by)
     }
     ctx.stroke()
+
+    // direction arrow at the edge midpoint (travel is always sNode→eNode)
+    if (t.scale >= 3) {
+      const wm = curveWorld(c, 0.5), wn = curveWorld(c, 0.54)
+      const m = worldToScreen(wm.x, wm.y, t), n = worldToScreen(wn.x, wn.y, t)
+      const ang = Math.atan2(n.sy - m.sy, n.sx - m.sx)
+      drawArrowhead(ctx, m.sx, m.sy, ang, Math.min(5, Math.max(3, t.scale * 0.5)), 'rgba(37,99,235,0.85)')
+    }
   }
   ctx.setLineDash([])
 }
@@ -274,8 +324,12 @@ function drawEdges(ctx: CanvasRenderingContext2D, map: FleetMap, t: Transform, c
 function drawNodes(ctx: CanvasRenderingContext2D, map: FleetMap, t: Transform, cfg: MapViewConfig, hiddenNodes: Set<string>) {
   const r = cfg.nodeSize
   const showLbl = t.scale >= cfg.labelZoomThreshold
+  // first pass: dots; second pass: labels with collision-skip so dense
+  // clusters don't turn into an unreadable pile of overlapping text.
+  const placed: { x1: number; y1: number; x2: number; y2: number }[] = []
+  type Vis = { p: typeof map.points[number]; sx: number; sy: number }
+  const visible: Vis[] = []
   for (const p of map.points) {
-    // a storage icon stands in for this node (until Store is toggled off)
     if (hiddenNodes.has(p.id)) continue
     if (p.cls === 'LocationMark' && !cfg.showLM) continue
     if (p.cls === 'ActionPoint'  && !cfg.showAP) continue
@@ -285,39 +339,76 @@ function drawNodes(ctx: CanvasRenderingContext2D, map: FleetMap, t: Transform, c
     if (sy < -20 || sy > ctx.canvas.height + 20) continue
     ctx.beginPath(); ctx.arc(sx, sy, r, 0, Math.PI * 2)
     if (p.cls === 'Charge') {
-      ctx.fillStyle = 'rgba(245,158,11,0.55)'; ctx.strokeStyle = '#b45309'; ctx.lineWidth = 1.6
+      ctx.fillStyle = 'rgba(245,158,11,0.55)'; ctx.strokeStyle = '#b45309'; ctx.lineWidth = 1.2
     } else if (p.cls === 'ActionPoint') {
-      ctx.fillStyle = 'rgba(234,122,0,0.35)'; ctx.strokeStyle = '#c2410c'; ctx.lineWidth = 1.4
+      ctx.fillStyle = 'rgba(234,122,0,0.35)'; ctx.strokeStyle = '#c2410c'; ctx.lineWidth = 1.1
     } else {
-      ctx.fillStyle = 'rgba(37,99,235,0.35)'; ctx.strokeStyle = '#1d4ed8'; ctx.lineWidth = 1.4
+      ctx.fillStyle = 'rgba(37,99,235,0.35)'; ctx.strokeStyle = '#1d4ed8'; ctx.lineWidth = 1.1
     }
     ctx.fill(); ctx.stroke()
-    if (showLbl) {
-      ctx.font = `${cfg.labelSize}px Roboto Mono, "Noto Sans JP", monospace`
-      ctx.textAlign = 'center'
-      const tw = ctx.measureText(p.id).width
-      const ly = sy + r + cfg.labelSize + 1
-      ctx.fillStyle = 'rgba(255,255,255,0.92)'
-      ctx.fillRect(sx - tw / 2 - 1, ly - cfg.labelSize + 1, tw + 2, cfg.labelSize + 1)
-      ctx.fillStyle = p.cls === 'Charge' ? '#b45309' : p.cls === 'ActionPoint' ? '#c2410c' : '#1d4ed8'
-      ctx.fillText(p.id, sx, ly)
-    }
+    visible.push({ p, sx, sy })
+  }
+  if (!showLbl) return
+  ctx.font = `${cfg.labelSize}px Roboto Mono, "Noto Sans JP", monospace`
+  ctx.textAlign = 'center'
+  for (const { p, sx, sy } of visible) {
+    const tw = ctx.measureText(p.id).width
+    const ly = sy + r + cfg.labelSize + 1
+    const box = { x1: sx - tw / 2 - 1, y1: ly - cfg.labelSize + 1, x2: sx + tw / 2 + 1, y2: ly + 2 }
+    // skip labels that would overlap one already drawn (declutters clusters)
+    if (placed.some(q => box.x1 < q.x2 && box.x2 > q.x1 && box.y1 < q.y2 && box.y2 > q.y1)) continue
+    placed.push(box)
+    ctx.fillStyle = 'rgba(255,255,255,0.92)'
+    ctx.fillRect(box.x1, box.y1, tw + 2, cfg.labelSize + 1)
+    ctx.fillStyle = p.cls === 'Charge' ? '#b45309' : p.cls === 'ActionPoint' ? '#c2410c' : '#1d4ed8'
+    ctx.fillText(p.id, sx, ly)
   }
 }
 
 function drawRobotPath(ctx: CanvasRenderingContext2D, map: FleetMap, r: Robot, t: Transform, cfg: MapViewConfig) {
   if (!cfg.showPaths || r.path.length < 2) return
-  const nodeMap = new Map(map.points.map(p => [p.id, p]))
-  const col = STATUS_COLOR[r.status]
-  ctx.beginPath(); ctx.strokeStyle = col + '66'
-  ctx.lineWidth = Math.max(2, t.scale * 0.7); ctx.setLineDash([])
-  let first = true
-  for (const id of r.path) {
-    const n = nodeMap.get(id); if (!n) continue
-    const { sx, sy } = worldToScreen(n.x, n.y, t)
-    if (first) { ctx.moveTo(sx, sy); first = false } else ctx.lineTo(sx, sy)
+  const col = r.color ?? STATUS_COLOR[r.status]   // AMR identity colour
+  const lw = Math.max(1, t.scale * 0.22)
+  // "marching ants" so the upcoming route reads as the planned/active path
+  const dash = Math.max(4, t.scale * 0.9)
+  ctx.lineWidth = lw; ctx.lineCap = 'round'
+  ctx.strokeStyle = col + 'cc'
+  ctx.setLineDash([dash, dash * 0.7])
+  ctx.lineDashOffset = -(Date.now() / 40) % (dash * 1.7)
+
+  // follow the actual lane geometry between consecutive route nodes
+  for (let i = 0; i < r.path.length - 1; i++) {
+    const a = r.path[i], b = r.path[i + 1]
+    const c = map.curves.find(e => e.sNode === a && e.eNode === b)
+      ?? map.curves.find(e => (e.sNode === b && e.eNode === a)) // fallback if listed reversed
+    ctx.beginPath()
+    if (c) {
+      const { sx: ax, sy: ay } = worldToScreen(c.sx, c.sy, t)
+      const { sx: bx, sy: by } = worldToScreen(c.ex, c.ey, t)
+      // draw in travel order a→b regardless of how the curve is stored
+      const fwd = c.sNode === a
+      const p0 = fwd ? { x: ax, y: ay } : { x: bx, y: by }
+      const p1 = fwd ? { x: bx, y: by } : { x: ax, y: ay }
+      ctx.moveTo(p0.x, p0.y)
+      if (c.type === 'bezier' && c.cp.length >= 2) {
+        const c1 = worldToScreen(c.cp[0].x, c.cp[0].y, t), c2 = worldToScreen(c.cp[1].x, c.cp[1].y, t)
+        if (fwd) ctx.bezierCurveTo(c1.sx, c1.sy, c2.sx, c2.sy, p1.x, p1.y)
+        else ctx.bezierCurveTo(c2.sx, c2.sy, c1.sx, c1.sy, p1.x, p1.y)
+      } else if (c.type === 'bezier' && c.cp.length === 1) {
+        const cp = worldToScreen(c.cp[0].x, c.cp[0].y, t)
+        ctx.quadraticCurveTo(cp.sx, cp.sy, p1.x, p1.y)
+      } else {
+        ctx.lineTo(p1.x, p1.y)
+      }
+    } else {
+      const na = map.points.find(p => p.id === a), nb = map.points.find(p => p.id === b)
+      if (!na || !nb) continue
+      const pa = worldToScreen(na.x, na.y, t), pb = worldToScreen(nb.x, nb.y, t)
+      ctx.moveTo(pa.sx, pa.sy); ctx.lineTo(pb.sx, pb.sy)
+    }
+    ctx.stroke()
   }
-  ctx.stroke()
+  ctx.setLineDash([]); ctx.lineDashOffset = 0
 }
 
 function drawRobot(ctx: CanvasRenderingContext2D, r: Robot, t: Transform, cfg: MapViewConfig, selId: string | null) {
@@ -329,6 +420,7 @@ function drawRobot(ctx: CanvasRenderingContext2D, r: Robot, t: Transform, cfg: M
   const sz = Math.max(10, cfg.robotSize * t.scale); const half = sz / 2
   if (sx < -sz * 2 || sx > ctx.canvas.width + sz * 2) return
   const col = STATUS_COLOR[r.status]
+  const idc = r.color ?? col          // AMR identity colour (distinguishes robots)
   // Glow
   if (r.status === 'EXECUTING' || r.status === 'ERROR') {
     const g = ctx.createRadialGradient(sx, sy, 0, sx, sy, sz)
@@ -348,17 +440,17 @@ function drawRobot(ctx: CanvasRenderingContext2D, r: Robot, t: Transform, cfg: M
     ctx.fill(); ctx.stroke()
   }
   ctx.restore()
-  // Label
+  // Label (in the identity colour)
   const lblSz = Math.max(8, cfg.labelSize - 1)
   ctx.font = `bold ${lblSz}px Roboto Mono, "Noto Sans JP", monospace`; ctx.textAlign = 'center'
   const lw = ctx.measureText(r.id).width; const lby = sy + half + lblSz + 4
   ctx.fillStyle = 'rgba(255,255,255,0.85)'
   ctx.fillRect(sx - lw / 2 - 2, lby - lblSz, lw + 4, lblSz + 2)
-  ctx.fillStyle = col; ctx.fillText(r.id, sx, lby)
+  ctx.fillStyle = idc; ctx.fillText(r.id, sx, lby)
   // Selection ring
   if (selId === r.id) {
     ctx.beginPath(); ctx.arc(sx, sy, half * 1.6, 0, Math.PI * 2)
-    ctx.strokeStyle = col + '44'; ctx.lineWidth = 1
+    ctx.strokeStyle = idc + '66'; ctx.lineWidth = 1.5
     ctx.setLineDash([4, 4]); ctx.stroke(); ctx.setLineDash([])
   }
 }

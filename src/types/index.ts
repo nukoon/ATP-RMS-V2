@@ -111,6 +111,7 @@ export interface VDA5050Warning {
 export interface Robot {
   id: string                   // e.g. "AMR-001"
   model: AgvModel
+  color?: string               // identity colour (status-independent) for map/path
   status: AgvStatus
   pose: AgvPose
   battery: AgvBattery

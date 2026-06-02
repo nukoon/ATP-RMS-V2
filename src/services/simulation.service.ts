@@ -206,7 +206,7 @@ export class SimulationService {
         pos: { x: home.x, y: home.y }, theta: this.parkHeading(home.id), lastLog: 0,
       }
       store.upsertRobot({
-        id: f.id, model: f.model, status: 'IDLE',
+        id: f.id, model: f.model, color: f.color, status: 'IDLE',
         pose: { x: home.x, y: home.y, theta: bot.theta, mapId: 'sim' },
         battery: { batteryCharge: bot.battery, charging: false },
         velocity: { vx: 0, vy: 0, omega: 0 },
@@ -467,6 +467,11 @@ export class SimulationService {
       safetyState: { fieldViolation: false, eStop: 'NONE' },
     }
     store.updateFromVDA5050(b.id, state)
+
+    // publish the upcoming route (current node → remaining edge ends) so the
+    // map can highlight the path the robot is about to drive
+    const path = b.edge ? [b.node, ...b.route.map(e => e.eNode)] : []
+    store.setRobotPath(b.id, path)
 
     if (now - b.lastLog > 1000) {
       b.lastLog = now

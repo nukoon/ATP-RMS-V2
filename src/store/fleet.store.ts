@@ -28,6 +28,7 @@ interface FleetStore {
   robots:      Map<string, Robot>
   upsertRobot: (robot: Robot) => void
   updateFromVDA5050: (robotId: string, state: VDA5050State) => void
+  setRobotPath: (robotId: string, path: string[]) => void
 
   // Orders
   orders:      FleetOrder[]
@@ -118,6 +119,16 @@ export const useFleetStore = create<FleetStore>()(
       })
       get().recomputeMetrics()
     },
+
+    setRobotPath: (robotId, path) => set(s => {
+      const existing = s.robots.get(robotId)
+      if (!existing) return s
+      // avoid needless re-renders if the path is unchanged
+      if (existing.path.length === path.length && existing.path.every((n, i) => n === path[i])) return s
+      const robots = new Map(s.robots)
+      robots.set(robotId, { ...existing, path })
+      return { robots }
+    }),
 
     orders: [],
     setOrders: (orders) => set({ orders }),

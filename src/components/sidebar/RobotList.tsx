@@ -40,7 +40,10 @@ function RobotCard({ robot: r, selected, onClick }: { robot: Robot; selected: bo
       }}
     >
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-        <span style={{ fontFamily: 'Roboto Mono', fontSize: 11, color: '#2563eb' }}>{r.id}</span>
+        <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+          <span style={{ width: 9, height: 9, borderRadius: '50%', background: r.color ?? '#94a3b4', flexShrink: 0, border: '1px solid rgba(0,0,0,0.15)' }} />
+          <span style={{ fontFamily: 'Roboto Mono', fontSize: 11, color: '#1a2230' }}>{r.id}</span>
+        </span>
         <span style={{
           fontSize: 8, padding: '1px 5px', borderRadius: 2, fontWeight: 700, letterSpacing: 1,
           color: col, border: `1px solid ${col}40`, background: col + '12',
