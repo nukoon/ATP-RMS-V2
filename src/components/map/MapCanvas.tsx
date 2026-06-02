@@ -461,11 +461,11 @@ function drawAreas(ctx: CanvasRenderingContext2D, map: FleetMap, areas: StorageA
     const a2 = worldToScreen(maxX, minY, t)   // bottom-right
     const x = a1.sx, y = a1.sy, w = a2.sx - a1.sx, h = a2.sy - a1.sy
     const col = a.kind === 'PICK' ? '#2563eb' : a.kind === 'DROP' ? '#f59e0b' : '#7c3aed'
-    // soft fill + a clear solid rounded border
+    // soft fill + a clean rounded dashed border (round caps read smoother)
     ctx.beginPath(); ctx.roundRect(x, y, w, h, 8)
     ctx.fillStyle = col + '10'; ctx.fill()
-    ctx.strokeStyle = col; ctx.globalAlpha = 0.55; ctx.lineWidth = 2; ctx.setLineDash([7, 4]); ctx.stroke()
-    ctx.setLineDash([]); ctx.globalAlpha = 1
+    ctx.strokeStyle = col; ctx.globalAlpha = 0.5; ctx.lineWidth = 1.5; ctx.lineCap = 'round'; ctx.setLineDash([6, 5]); ctx.stroke()
+    ctx.setLineDash([]); ctx.lineCap = 'butt'; ctx.globalAlpha = 1
 
     // name in a solid pill straddling the top-left corner (readable over content)
     if (t.scale >= cfg.labelZoomThreshold) {
@@ -475,8 +475,11 @@ function drawAreas(ctx: CanvasRenderingContext2D, map: FleetMap, areas: StorageA
       const text = `${a.name} · ${a.kind}`
       const tw = ctx.measureText(text).width
       const chipH = lblPx + 7, chipW = tw + 14
-      ctx.beginPath(); ctx.roundRect(x + 6, y - chipH / 2, chipW, chipH, 4)
+      ctx.save()
+      ctx.shadowColor = 'rgba(26,34,48,0.22)'; ctx.shadowBlur = 4; ctx.shadowOffsetY = 1
+      ctx.beginPath(); ctx.roundRect(x + 6, y - chipH / 2, chipW, chipH, 5)
       ctx.fillStyle = col; ctx.fill()
+      ctx.restore()
       ctx.fillStyle = '#ffffff'; ctx.fillText(text, x + 13, y + 0.5)
       ctx.textBaseline = 'alphabetic'
     }
@@ -498,12 +501,20 @@ function drawTrafficAreas(ctx: CanvasRenderingContext2D, map: FleetMap, zones: T
     ctx.save()
     ctx.beginPath(); ctx.roundRect(x, y, w, h, 5)
     ctx.fillStyle = col + '12'; ctx.fill()
-    ctx.strokeStyle = col + '88'; ctx.lineWidth = 1.5; ctx.setLineDash([2, 4]); ctx.stroke(); ctx.setLineDash([])
+    ctx.strokeStyle = col + '88'; ctx.lineWidth = 1.5; ctx.lineCap = 'round'; ctx.setLineDash([2, 5]); ctx.stroke(); ctx.setLineDash([])
     ctx.restore()
     if (t.scale >= cfg.labelZoomThreshold) {
-      ctx.font = `bold ${Math.max(8, cfg.labelSize - 2)}px Roboto Mono, "Noto Sans JP", monospace`
-      ctx.textAlign = 'left'; ctx.fillStyle = col
-      ctx.fillText(`⛒ ${z.name} ·${z.capacity}`, x + 4, y + h - 4)
+      const lblPx = Math.max(9, cfg.labelSize - 2)
+      ctx.font = `bold ${lblPx}px Roboto Mono, "Noto Sans JP", monospace`
+      ctx.textAlign = 'left'; ctx.textBaseline = 'middle'
+      const text = `${z.name} · ${z.capacity}`
+      const tw = ctx.measureText(text).width
+      const chipH = lblPx + 7, chipW = tw + 13, cyl = y + h - chipH / 2 - 2
+      // solid red chip so the zone name stays legible over lanes/nodes
+      ctx.beginPath(); ctx.roundRect(x + 5, cyl - chipH / 2, chipW, chipH, 4)
+      ctx.fillStyle = col + 'e6'; ctx.fill()
+      ctx.fillStyle = '#ffffff'; ctx.fillText(text, x + 11, cyl + 0.5)
+      ctx.textBaseline = 'alphabetic'
     }
   }
 }
@@ -605,13 +616,16 @@ function drawAxes(ctx: CanvasRenderingContext2D, t: Transform) {
 
 function drawEdges(ctx: CanvasRenderingContext2D, map: FleetMap, t: Transform, cfg: MapViewConfig) {
   if (!cfg.showEdges) return
-  const lw = Math.max(0.5, t.scale * 0.11)
-  const EDGE = 'rgba(140,168,201,0.85)'   // soft steel-blue lane
+  const lw = Math.max(0.75, t.scale * 0.12)
+  const EDGE = 'rgba(143,166,197,0.92)'   // soft steel-blue lane
+  const ARROW = 'rgba(90,124,166,0.95)'   // a darker shade of the lane, in-family
+  // round caps + joins keep bezier lanes smooth and modern (no harsh corners)
+  ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.setLineDash([])
   for (const c of map.curves) {
     const { sx: ax, sy: ay } = worldToScreen(c.sx, c.sy, t)
     const { sx: bx, sy: by } = worldToScreen(c.ex, c.ey, t)
     if (Math.max(ax, bx) < -10 || Math.min(ax, bx) > ctx.canvas.width + 10) continue
-    ctx.beginPath(); ctx.lineWidth = lw; ctx.strokeStyle = EDGE; ctx.setLineDash([])
+    ctx.beginPath(); ctx.lineWidth = lw; ctx.strokeStyle = EDGE
     if (c.type === 'bezier' && c.cp.length >= 2) {
       const { sx: c1x, sy: c1y } = worldToScreen(c.cp[0].x, c.cp[0].y, t)
       const { sx: c2x, sy: c2y } = worldToScreen(c.cp[1].x, c.cp[1].y, t)
@@ -630,10 +644,10 @@ function drawEdges(ctx: CanvasRenderingContext2D, map: FleetMap, t: Transform, c
       const wm = curveWorld(c, 0.5), wn = curveWorld(c, 0.54)
       const m = worldToScreen(wm.x, wm.y, t), n = worldToScreen(wn.x, wn.y, t)
       const ang = Math.atan2(n.sy - m.sy, n.sx - m.sx)
-      drawArrowhead(ctx, m.sx, m.sy, ang, Math.max(2, Math.min(7, t.scale * 0.42)), 'rgba(63,127,200,0.9)')
+      drawArrowhead(ctx, m.sx, m.sy, ang, Math.max(2, Math.min(7, t.scale * 0.42)), ARROW)
     }
   }
-  ctx.setLineDash([])
+  ctx.lineCap = 'butt'; ctx.lineJoin = 'miter'; ctx.setLineDash([])
 }
 
 // Heat ramp green→amber→red for a normalized value 0..1.
@@ -712,42 +726,46 @@ function drawNodes(ctx: CanvasRenderingContext2D, map: FleetMap, t: Transform, c
     visible.push({ p, sx, sy })
   }
   if (!showLbl) return
-  // Label size grows with zoom: tiny in the overview, detailed when zoomed in
-  // (capped at the toolbar "Label px"). Keeps the big picture uncluttered.
-  const lblPx = Math.max(6, Math.min(cfg.labelSize, Math.round(t.scale * 1.0)))
-  ctx.font = `${lblPx}px Roboto Mono, "Noto Sans JP", monospace`
-  ctx.textAlign = 'center'
+  // Label size grows with zoom: small in the overview, detailed when zoomed in
+  // (capped at the toolbar "Label px"). 9px floor keeps it readable on a wall
+  // display; the node dot above already carries the class colour, so the id
+  // text stays a neutral ink for hierarchy (type vs. name read on two channels).
+  const lblPx = Math.round(Math.max(9, Math.min(cfg.labelSize, t.scale * 1.2)))
+  ctx.font = `500 ${lblPx}px Roboto Mono, "Noto Sans JP", monospace`
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
+  const padX = 4, padY = 2
   for (const { p, sx, sy } of visible) {
     const tw = ctx.measureText(p.id).width
-    const ly = sy + r + lblPx + 1
-    const box = { x1: sx - tw / 2 - 1, y1: ly - lblPx + 1, x2: sx + tw / 2 + 1, y2: ly + 2 }
+    const bw = tw + padX * 2, bh = lblPx + padY * 2
+    const cy = sy + r + 2 + bh / 2          // chip sits just below the node dot
+    const bx = sx - bw / 2, by = cy - bh / 2
+    const box = { x1: bx, y1: by, x2: bx + bw, y2: by + bh }
     // skip labels that would overlap one already drawn (declutters clusters)
     if (placed.some(q => box.x1 < q.x2 && box.x2 > q.x1 && box.y1 < q.y2 && box.y2 > q.y1)) continue
     placed.push(box)
-    ctx.fillStyle = 'rgba(255,255,255,0.9)'
-    ctx.fillRect(box.x1, box.y1, tw + 2, lblPx + 1)
-    ctx.fillStyle = p.cls === 'Charge' ? '#b45309' : p.cls === 'ActionPoint' ? '#c2410c' : '#1d4ed8'
-    ctx.fillText(p.id, sx, ly)
+    // rounded chip lifts the id off the lanes/grid behind it
+    ctx.beginPath(); ctx.roundRect(bx, by, bw, bh, 3)
+    ctx.fillStyle = 'rgba(255,255,255,0.92)'; ctx.fill()
+    ctx.lineWidth = 1; ctx.strokeStyle = 'rgba(208,215,226,0.85)'; ctx.stroke()
+    ctx.fillStyle = '#334155'
+    ctx.fillText(p.id, sx, cy + 0.5)
   }
+  ctx.textBaseline = 'alphabetic'   // reset so other text (storage labels) is unaffected
 }
 
 function drawRobotPath(ctx: CanvasRenderingContext2D, map: FleetMap, r: Robot, t: Transform, cfg: MapViewConfig) {
   if (!cfg.showPaths || r.path.length < 2) return
   const col = r.color ?? STATUS_COLOR[r.status]   // AMR identity colour
   const lw = Math.max(1, t.scale * 0.22)
-  // "marching ants" so the upcoming route reads as the planned/active path
-  const dash = Math.max(4, t.scale * 0.9)
-  ctx.lineWidth = lw; ctx.lineCap = 'round'
-  ctx.strokeStyle = col + 'cc'
-  ctx.setLineDash([dash, dash * 0.7])
-  ctx.lineDashOffset = -(Date.now() / 40) % (dash * 1.7)
 
-  // follow the actual lane geometry between consecutive route nodes
+  // Build the whole route once (following lane geometry) into a Path2D so we
+  // can stroke it twice: a soft wide casing that lifts the route off the
+  // steel-blue lanes, then crisp "marching ants" on top for the active path.
+  const route = new Path2D()
   for (let i = 0; i < r.path.length - 1; i++) {
     const a = r.path[i], b = r.path[i + 1]
     const c = map.curves.find(e => e.sNode === a && e.eNode === b)
       ?? map.curves.find(e => (e.sNode === b && e.eNode === a)) // fallback if listed reversed
-    ctx.beginPath()
     if (c) {
       const { sx: ax, sy: ay } = worldToScreen(c.sx, c.sy, t)
       const { sx: bx, sy: by } = worldToScreen(c.ex, c.ey, t)
@@ -755,26 +773,49 @@ function drawRobotPath(ctx: CanvasRenderingContext2D, map: FleetMap, r: Robot, t
       const fwd = c.sNode === a
       const p0 = fwd ? { x: ax, y: ay } : { x: bx, y: by }
       const p1 = fwd ? { x: bx, y: by } : { x: ax, y: ay }
-      ctx.moveTo(p0.x, p0.y)
+      route.moveTo(p0.x, p0.y)
       if (c.type === 'bezier' && c.cp.length >= 2) {
         const c1 = worldToScreen(c.cp[0].x, c.cp[0].y, t), c2 = worldToScreen(c.cp[1].x, c.cp[1].y, t)
-        if (fwd) ctx.bezierCurveTo(c1.sx, c1.sy, c2.sx, c2.sy, p1.x, p1.y)
-        else ctx.bezierCurveTo(c2.sx, c2.sy, c1.sx, c1.sy, p1.x, p1.y)
+        if (fwd) route.bezierCurveTo(c1.sx, c1.sy, c2.sx, c2.sy, p1.x, p1.y)
+        else route.bezierCurveTo(c2.sx, c2.sy, c1.sx, c1.sy, p1.x, p1.y)
       } else if (c.type === 'bezier' && c.cp.length === 1) {
         const cp = worldToScreen(c.cp[0].x, c.cp[0].y, t)
-        ctx.quadraticCurveTo(cp.sx, cp.sy, p1.x, p1.y)
+        route.quadraticCurveTo(cp.sx, cp.sy, p1.x, p1.y)
       } else {
-        ctx.lineTo(p1.x, p1.y)
+        route.lineTo(p1.x, p1.y)
       }
     } else {
       const na = map.points.find(p => p.id === a), nb = map.points.find(p => p.id === b)
       if (!na || !nb) continue
       const pa = worldToScreen(na.x, na.y, t), pb = worldToScreen(nb.x, nb.y, t)
-      ctx.moveTo(pa.sx, pa.sy); ctx.lineTo(pb.sx, pb.sy)
+      route.moveTo(pa.sx, pa.sy); route.lineTo(pb.sx, pb.sy)
     }
-    ctx.stroke()
   }
+
+  ctx.lineCap = 'round'; ctx.lineJoin = 'round'
+  // casing
   ctx.setLineDash([]); ctx.lineDashOffset = 0
+  ctx.strokeStyle = col + '26'; ctx.lineWidth = lw * 2.6; ctx.stroke(route)
+  // marching ants on top
+  const dash = Math.max(4, t.scale * 0.9)
+  ctx.strokeStyle = col + 'e6'; ctx.lineWidth = lw
+  ctx.setLineDash([dash, dash * 0.7])
+  ctx.lineDashOffset = -(Date.now() / 40) % (dash * 1.7)
+  ctx.stroke(route)
+  ctx.setLineDash([]); ctx.lineDashOffset = 0
+
+  // destination marker at the route's final node: a ring + dot so the operator
+  // sees where this robot is headed without tracing the whole line.
+  const dest = map.points.find(p => p.id === r.path[r.path.length - 1])
+  if (dest) {
+    const e = worldToScreen(dest.x, dest.y, t)
+    const rr = Math.max(4, lw * 2.3)
+    ctx.beginPath(); ctx.arc(e.sx, e.sy, rr, 0, Math.PI * 2)
+    ctx.strokeStyle = col + 'cc'; ctx.lineWidth = Math.max(1.5, lw * 0.7); ctx.stroke()
+    ctx.beginPath(); ctx.arc(e.sx, e.sy, Math.max(1.5, rr * 0.34), 0, Math.PI * 2)
+    ctx.fillStyle = col; ctx.fill()
+  }
+  ctx.lineCap = 'butt'; ctx.lineJoin = 'miter'
 }
 
 function drawRobot(ctx: CanvasRenderingContext2D, r: Robot, t: Transform, cfg: MapViewConfig, selId: string | null) {
