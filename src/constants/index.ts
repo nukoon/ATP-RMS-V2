@@ -62,6 +62,7 @@ export const DEFAULT_MAP_CONFIG = {
   showPaths: true,
   showTheta: false,
   showStorage: true,
+  showHeatmap: false,
   nodeSize: 1,
   labelSize: 12,
   labelZoomThreshold: 1.0,

@@ -22,6 +22,8 @@ import { StorageDialog } from '@/components/StorageDialog'
 import { MultiStorageDialog } from '@/components/MultiStorageDialog'
 import { TrafficAreaDialog } from '@/components/TrafficAreaDialog'
 import { FacilitiesDialog } from '@/components/FacilitiesDialog'
+import { DashboardDialog } from '@/components/DashboardDialog'
+import { HistoryDialog } from '@/components/HistoryDialog'
 import { MapToolbar }   from '@/components/map/MapToolbar'
 import { MapCanvas }    from '@/components/map/MapCanvas'
 import { StatusBar }    from '@/components/StatusBar'
@@ -40,6 +42,8 @@ export default function App() {
   const [live, setLive] = useState(false)
   const [showStorageDialog, setShowStorageDialog] = useState(false)
   const [showFacilities, setShowFacilities] = useState(false)   // docks + traffic
+  const [showDashboard, setShowDashboard] = useState(false)     // KPI dashboard
+  const [showHistory, setShowHistory] = useState(false)         // task history + CSV
   // lasso nodes on the map → either bulk storage, or a traffic area
   const [lasso, setLasso] = useState<null | 'storage' | 'traffic'>(null)
   const [picked, setPicked] = useState<{ purpose: 'storage' | 'traffic'; ids: string[] } | null>(null)
@@ -166,6 +170,8 @@ export default function App() {
         onChange={setMapConfig}
         onZoomIn={ctrl.zoomIn} onZoomOut={ctrl.zoomOut} onFit={ctrl.fitToCanvas}
         onManageFacilities={() => setShowFacilities(true)}
+        onOpenDashboard={() => setShowDashboard(true)}
+        onOpenHistory={() => setShowHistory(true)}
       />
 
       {/* MAIN */}
@@ -268,6 +274,8 @@ export default function App() {
       {showConfig && <ConfigDialog initialTab={configTab} onClose={() => setShowConfig(false)} />}
       {showStorageDialog && <StorageDialog onClose={() => setShowStorageDialog(false)} />}
       {showFacilities && <FacilitiesDialog onClose={() => setShowFacilities(false)} onDrawTrafficArea={() => { setShowFacilities(false); setSelectedRobotId(null); setLasso('traffic') }} />}
+      {showDashboard && <DashboardDialog onClose={() => setShowDashboard(false)} />}
+      {showHistory && <HistoryDialog onClose={() => setShowHistory(false)} />}
       {picked?.purpose === 'storage' && <MultiStorageDialog nodeIds={picked.ids} onClose={() => setPicked(null)} />}
       {picked?.purpose === 'traffic' && <TrafficAreaDialog nodeIds={picked.ids} onClose={() => setPicked(null)} />}
 

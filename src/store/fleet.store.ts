@@ -48,6 +48,11 @@ interface FleetStore {
   pushAlarm:   (a: Alarm) => void
   resolveAlarm: (id: string) => void
 
+  // Edge traffic heatmap — cumulative traversal count per edge id (sim-driven)
+  edgeHeat:    Map<string, number>
+  bumpEdgeHeat: (edgeId: string) => void
+  resetEdgeHeat: () => void
+
   // MQTT Log (ring buffer, max 100)
   mqttLog:     MqttLogEntry[]
   pushMqttLog: (entry: MqttLogEntry) => void
@@ -152,8 +157,8 @@ export const useFleetStore = create<FleetStore>()(
     addMission: (m) => set(s => ({ missions: [m, ...s.missions] })),
     updateMission: (id, patch) => {
       set(s => ({ missions: s.missions.map(m => m.id === id ? { ...m, ...patch } : m) }))
-      // Persist meaningful transitions only (status set); skip progress-only ticks.
-      if (patch.status !== undefined) syncMission(id, patch)
+      // Persist meaningful transitions only (status / priority); skip progress-only ticks.
+      if (patch.status !== undefined || patch.priority !== undefined) syncMission(id, patch)
     },
     cancelMission: (id) => {
       const patch = { status: 'CANCELLED' as const, finishedAt: new Date().toISOString() }
@@ -172,6 +177,14 @@ export const useFleetStore = create<FleetStore>()(
     resolveAlarm: (id) =>
       set(s => ({ alarms: s.alarms.map(a =>
         a.id === id ? { ...a, status: 'RESOLVED', resolvedAt: new Date().toISOString() } : a) })),
+
+    edgeHeat: new Map(),
+    bumpEdgeHeat: (edgeId) => set(s => {
+      const edgeHeat = new Map(s.edgeHeat)
+      edgeHeat.set(edgeId, (edgeHeat.get(edgeId) ?? 0) + 1)
+      return { edgeHeat }
+    }),
+    resetEdgeHeat: () => set({ edgeHeat: new Map() }),
 
     mqttLog: [],
     pushMqttLog: (entry) =>

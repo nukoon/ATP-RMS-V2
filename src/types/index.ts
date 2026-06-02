@@ -215,6 +215,7 @@ export interface MapViewConfig {
   showPaths: boolean
   showTheta: boolean
   showStorage: boolean
+  showHeatmap: boolean         // overlay edge traffic-density heatmap
   nodeSize: number             // px
   labelSize: number            // px
   labelZoomThreshold: number   // show labels when zoom >= this

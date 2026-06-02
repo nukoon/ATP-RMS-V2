@@ -366,7 +366,11 @@ export class SimulationService {
 
   // ── dispatch: nearest free bot by route to the PICKUP node ──
   private dispatch(store: ReturnType<typeof useFleetStore.getState>) {
-    const pending = store.missions.filter(m => m.status === 'PENDING')
+    // Highest priority first (1 = most urgent .. 9 = least); ties broken by age
+    // (oldest createdAt first, FIFO) so an "urgent" mission jumps the queue.
+    const pending = store.missions
+      .filter(m => m.status === 'PENDING')
+      .sort((a, b) => (a.priority - b.priority) || (a.createdAt < b.createdAt ? -1 : 1))
 
     // Locations (storages + nodes) already reserved by an in-flight job. A
     // pending mission whose pickup/dropoff collides with these is NOT executed —
@@ -614,6 +618,7 @@ export class SimulationService {
           const left = b.node
           b.node = target
           if (left !== target && this.reserved.get(left) === b.id) this.reserved.delete(left)
+          if (b.edge) store.bumpEdgeHeat(b.edge.id)   // traffic density for the heatmap
           b.route.shift()
           b.edge = b.route[0] ?? null
           b.t = 0

@@ -519,10 +519,11 @@ app.post('/api/missions/batch', requireAuth, wrap(async (req, res) => {
 }))
 
 app.patch('/api/missions/:id', requireAuth, wrap(async (req, res) => {
-  const { status, progress, agvId, assignedAt, startedAt, finishedAt } = req.body || {}
+  const { status, progress, priority, agvId, assignedAt, startedAt, finishedAt } = req.body || {}
   const sets = [], vals = []
   if (status !== undefined)     { sets.push('status = ?');      vals.push(status) }
   if (progress !== undefined)   { sets.push('progress = ?');    vals.push(progress) }
+  if (priority !== undefined)   { sets.push('priority = ?');    vals.push(priority) }
   if (agvId !== undefined)      { sets.push('agv_id = ?');      vals.push(agvId) }
   if (assignedAt !== undefined) { sets.push('assigned_at = ?'); vals.push(toMysqlTs(assignedAt)) }
   if (startedAt !== undefined)  { sets.push('started_at = ?');  vals.push(toMysqlTs(startedAt)) }

@@ -26,6 +26,7 @@ export function OrderPanel({ onManageStorage }: { onManageStorage?: () => void }
   const missions    = useFleetStore(s => s.missions)
   const addMission  = useFleetStore(s => s.addMission)
   const cancelMission = useFleetStore(s => s.cancelMission)
+  const updateMission = useFleetStore(s => s.updateMission)
   const map         = useFleetStore(s => s.map)
   const mqttConnected = useFleetStore(s => s.mqttConnected)
   const storages    = useStorageStore(s => s.storages)
@@ -152,11 +153,25 @@ export function OrderPanel({ onManageStorage }: { onManageStorage?: () => void }
         {missions.length === 0 && <div style={{ fontSize: 10, color: '#94a3b4', padding: '10px 12px' }}>No missions yet</div>}
         {missions.slice(0, 40).map(m => (
           <div key={m.id} style={{ padding: '6px 12px', borderBottom: '1px solid rgba(212,218,227,0.6)' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 6 }}>
               <span style={{ fontFamily: 'Roboto Mono', fontSize: 10, color: '#2563eb' }}>{m.missionNo}</span>
-              <span style={{ fontSize: 8, padding: '1px 5px', borderRadius: 2, fontWeight: 700, letterSpacing: 0.5,
-                color: STATUS_COLOR[m.status], border: `1px solid ${STATUS_COLOR[m.status]}40`, background: STATUS_COLOR[m.status] + '12' }}>
-                {m.status}
+              <span style={{ display: 'flex', alignItems: 'center', gap: 4, marginLeft: 'auto' }}>
+                {/* priority chip — P1 (urgent) is highlighted red */}
+                <span title={`Priority ${m.priority}`} style={{ fontSize: 8, fontFamily: 'Roboto Mono', fontWeight: 700, padding: '1px 4px', borderRadius: 2,
+                  color: m.priority <= 1 ? '#dc2626' : '#64748b', border: `1px solid ${m.priority <= 1 ? 'rgba(220,38,38,0.4)' : '#d4dae3'}`,
+                  background: m.priority <= 1 ? 'rgba(220,38,38,0.08)' : 'transparent' }}>
+                  P{m.priority}
+                </span>
+                {/* urgent: jump this PENDING mission to the front of the dispatch queue */}
+                {m.status === 'PENDING' && m.priority > 1 && (
+                  <button onClick={() => updateMission(m.id, { priority: 1 })} title="Mark urgent (priority 1)"
+                    style={{ fontSize: 9, lineHeight: 1, padding: '1px 4px', borderRadius: 2, cursor: 'pointer', color: '#dc2626',
+                      border: '1px solid rgba(220,38,38,0.35)', background: 'rgba(220,38,38,0.06)' }}>⚡</button>
+                )}
+                <span style={{ fontSize: 8, padding: '1px 5px', borderRadius: 2, fontWeight: 700, letterSpacing: 0.5,
+                  color: STATUS_COLOR[m.status], border: `1px solid ${STATUS_COLOR[m.status]}40`, background: STATUS_COLOR[m.status] + '12' }}>
+                  {m.status}
+                </span>
               </span>
             </div>
             <div style={{ fontSize: 9, color: '#64748b', marginTop: 2 }}>

@@ -66,6 +66,10 @@ export function MapCanvas({ map, robots, config, selectedRobotId, onRobotClick, 
   const trafficAreas = useStorageStore(s => s.trafficAreas)
   const trafficRef = useRef<TrafficArea[]>(trafficAreas)
   trafficRef.current = trafficAreas
+  // edge traffic-density heatmap (sim-accumulated), drawn each frame via a ref
+  const edgeHeat = useFleetStore(s => s.edgeHeat)
+  const edgeHeatRef = useRef<Map<string, number>>(edgeHeat)
+  edgeHeatRef.current = edgeHeat
   // storages currently reserved by an active job → show an "occupy" badge
   const missions = useFleetStore(s => s.missions)
   const occupiedRef = useRef<Set<string>>(new Set())
@@ -112,6 +116,7 @@ export function MapCanvas({ map, robots, config, selectedRobotId, onRobotClick, 
     drawGrid(ctx, canvas.width, canvas.height, tt)
     drawAxes(ctx, tt)
     drawEdges(ctx, map, tt, config)
+    if (config.showHeatmap) drawEdgeHeat(ctx, map, edgeHeatRef.current, tt)
     robots.forEach(r => drawRobotPath(ctx, map, r, tt, config))
     // when storage is shown, its icon stands in for the bound node (hide that node)
     const storageNodes = config.showStorage
@@ -327,6 +332,10 @@ function drawStorages(ctx: CanvasRenderingContext2D, map: FleetMap, storages: St
   // small px floor so it stays visible when zoomed far out. No upper clamp.
   const sz = Math.max(14, STORAGE_M * t.scale)
   const half = sz / 2
+  // Pass 1: draw the crate icons (+ occupy badge), and collect label candidates
+  // so the names can be laid out afterwards without crate icons covering them.
+  type Lbl = { sx: number; topY: number; text: string; col: string }
+  const labels: Lbl[] = []
   for (const s of storages) {
     if (!s.enabled) continue
     const node = map.points.find(p => p.id === s.nodeId)
@@ -359,18 +368,29 @@ function drawStorages(ctx: CanvasRenderingContext2D, map: FleetMap, storages: St
       }
     }
 
-    // name label above the icon (respect the label zoom threshold)
-    if (t.scale >= cfg.labelZoomThreshold) {
-      const lbl = s.name
-      ctx.font = `bold ${Math.max(8, cfg.labelSize - 2)}px Roboto Mono, "Noto Sans JP", monospace`
-      ctx.textAlign = 'center'
-      const lw = ctx.measureText(lbl).width
-      const ly = sy - half - 3
-      ctx.fillStyle = 'rgba(255,255,255,0.82)'
-      ctx.fillRect(sx - lw / 2 - 2, ly - 9, lw + 4, 11)
-      ctx.fillStyle = col
-      ctx.fillText(lbl, sx, ly)
-    }
+    if (t.scale >= cfg.labelZoomThreshold) labels.push({ sx, topY: sy - half, text: s.name, col })
+  }
+
+  // Pass 2: name labels in a SINGLE row just above each crate. Densely-packed
+  // crates would overlap into an unreadable run, so we declutter exactly like
+  // the node labels: keep a list of placed boxes and SKIP any label that would
+  // collide with one already drawn (so zooming out shows fewer names, zooming
+  // in reveals them all). No stacking — that just piles into a noisy block.
+  if (!labels.length) return
+  const lblPx = Math.max(8, cfg.labelSize - 2)
+  ctx.font = `bold ${lblPx}px Roboto Mono, "Noto Sans JP", monospace`
+  ctx.textAlign = 'center'
+  const placed: { x1: number; y1: number; x2: number; y2: number }[] = []
+  for (const L of [...labels].sort((a, b) => a.sx - b.sx)) {
+    const lw = ctx.measureText(L.text).width
+    const ly = L.topY - 3
+    const box = { x1: L.sx - lw / 2 - 2, y1: ly - lblPx, x2: L.sx + lw / 2 + 2, y2: ly + 3 }
+    if (placed.some(q => box.x1 < q.x2 && box.x2 > q.x1 && box.y1 < q.y2 && box.y2 > q.y1)) continue
+    placed.push(box)
+    ctx.fillStyle = 'rgba(255,255,255,0.85)'
+    ctx.fillRect(box.x1, ly - lblPx, lw + 4, lblPx + 3)
+    ctx.fillStyle = L.col
+    ctx.fillText(L.text, L.sx, ly)
   }
 }
 
@@ -563,6 +583,52 @@ function drawEdges(ctx: CanvasRenderingContext2D, map: FleetMap, t: Transform, c
     }
   }
   ctx.setLineDash([])
+}
+
+// Heat ramp green→amber→red for a normalized value 0..1.
+function heatColor(v: number): string {
+  const stops = [[22, 163, 74], [245, 158, 11], [220, 38, 38]]  // green, amber, red
+  const x = Math.max(0, Math.min(1, v)) * 2
+  const i = Math.min(1, Math.floor(x))
+  const f = x - i
+  const a = stops[i], b = stops[i + 1]
+  const c = a.map((ch, k) => Math.round(ch + (b[k] - ch) * f))
+  return `rgb(${c[0]},${c[1]},${c[2]})`
+}
+
+// EDGE HEATMAP: overlay each travelled lane with a translucent colour band
+// whose hue (green→red) and width grow with how many times AGVs crossed it,
+// so congestion / bottleneck corridors stand out. Sim-accumulated (edgeHeat).
+function drawEdgeHeat(ctx: CanvasRenderingContext2D, map: FleetMap, heat: Map<string, number>, t: Transform) {
+  if (!heat.size) return
+  let max = 0
+  for (const v of heat.values()) if (v > max) max = v
+  if (max <= 0) return
+  ctx.lineCap = 'round'
+  for (const c of map.curves) {
+    const h = heat.get(c.id)
+    if (!h) continue
+    const v = h / max                       // normalized density 0..1
+    const { sx: ax, sy: ay } = worldToScreen(c.sx, c.sy, t)
+    const { sx: bx, sy: by } = worldToScreen(c.ex, c.ey, t)
+    if (Math.max(ax, bx) < -10 || Math.min(ax, bx) > ctx.canvas.width + 10) continue
+    ctx.beginPath()
+    ctx.lineWidth = Math.max(1.5, t.scale * (0.12 + v * 0.45))
+    ctx.strokeStyle = heatColor(v)
+    ctx.globalAlpha = 0.30 + v * 0.45
+    if (c.type === 'bezier' && c.cp.length >= 2) {
+      const { sx: c1x, sy: c1y } = worldToScreen(c.cp[0].x, c.cp[0].y, t)
+      const { sx: c2x, sy: c2y } = worldToScreen(c.cp[1].x, c.cp[1].y, t)
+      ctx.moveTo(ax, ay); ctx.bezierCurveTo(c1x, c1y, c2x, c2y, bx, by)
+    } else if (c.type === 'bezier' && c.cp.length === 1) {
+      const { sx: cpx, sy: cpy } = worldToScreen(c.cp[0].x, c.cp[0].y, t)
+      ctx.moveTo(ax, ay); ctx.quadraticCurveTo(cpx, cpy, bx, by)
+    } else {
+      ctx.moveTo(ax, ay); ctx.lineTo(bx, by)
+    }
+    ctx.stroke()
+  }
+  ctx.globalAlpha = 1
 }
 
 function drawNodes(ctx: CanvasRenderingContext2D, map: FleetMap, t: Transform, cfg: MapViewConfig, hiddenNodes: Set<string>) {
