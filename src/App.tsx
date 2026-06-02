@@ -26,6 +26,7 @@ import { DashboardDialog } from '@/components/DashboardDialog'
 import { HistoryDialog } from '@/components/HistoryDialog'
 import { MapToolbar }   from '@/components/map/MapToolbar'
 import { MapCanvas }    from '@/components/map/MapCanvas'
+import { Map3DCanvas }  from '@/components/map/Map3DCanvas'
 import { StatusBar }    from '@/components/StatusBar'
 import { useMapTransform } from '@/hooks/useMapTransform'
 
@@ -44,6 +45,7 @@ export default function App() {
   const [showFacilities, setShowFacilities] = useState(false)   // docks + traffic
   const [showDashboard, setShowDashboard] = useState(false)     // KPI dashboard
   const [showHistory, setShowHistory] = useState(false)         // task history + CSV
+  const [view3d, setView3d] = useState(false)                   // 2D canvas ↔ 3D scene
   // lasso nodes on the map → either bulk storage, or a traffic area
   const [lasso, setLasso] = useState<null | 'storage' | 'traffic'>(null)
   const [picked, setPicked] = useState<{ purpose: 'storage' | 'traffic'; ids: string[] } | null>(null)
@@ -187,20 +189,48 @@ export default function App() {
         {/* MAP AREA */}
         <div style={{ flex: 1, background: '#eef1f5', position: 'relative', overflow: 'hidden' }}>
           {map ? (
-            <MapCanvas
-              map={map}
-              robots={robotList}
-              config={mapConfig}
-              selectedRobotId={selectedRobotId}
-              onRobotClick={setSelectedRobotId}
-              onHover={setCursor}
-              ctrl={ctrl}
-              selectMode={!!lasso}
-              onSelectNodes={(ids) => { const p = lasso; setLasso(null); if (p && ids.length) setPicked({ purpose: p, ids }) }}
-              onAreaContextMenu={(areaId, x, y) => setAreaMenu({ areaId, x, y })}
-            />
+            view3d ? (
+              <Map3DCanvas
+                map={map}
+                robots={robotList}
+                config={mapConfig}
+                selectedRobotId={selectedRobotId}
+                onRobotClick={setSelectedRobotId}
+              />
+            ) : (
+              <MapCanvas
+                map={map}
+                robots={robotList}
+                config={mapConfig}
+                selectedRobotId={selectedRobotId}
+                onRobotClick={setSelectedRobotId}
+                onHover={setCursor}
+                ctrl={ctrl}
+                selectMode={!!lasso}
+                onSelectNodes={(ids) => { const p = lasso; setLasso(null); if (p && ids.length) setPicked({ purpose: p, ids }) }}
+                onAreaContextMenu={(areaId, x, y) => setAreaMenu({ areaId, x, y })}
+              />
+            )
           ) : (
             <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#94a3b4', fontFamily: 'Roboto Mono', fontSize: 11 }}>Loading map...</div>
+          )}
+          {/* 2D ↔ 3D view switch (top-right of the map) */}
+          {map && (
+            <div style={{ position: 'absolute', top: 10, right: 12, zIndex: 6, display: 'flex', background: '#ffffff',
+              border: '1px solid #d4dae3', borderRadius: 7, boxShadow: '0 4px 14px rgba(26,34,48,0.12)', overflow: 'hidden',
+              fontFamily: 'Roboto Mono, "Noto Sans JP", monospace' }}>
+              {(['2D', '3D'] as const).map(m => {
+                const on = (m === '3D') === view3d
+                return (
+                  <button key={m} type="button" onClick={() => setView3d(m === '3D')} title={`${m} map view`}
+                    style={{ padding: '5px 13px', fontSize: 10, fontWeight: 700, letterSpacing: 1, cursor: 'pointer', border: 'none', outline: 'none',
+                      color: on ? '#ffffff' : '#64748b', background: on ? '#2563eb' : 'transparent',
+                      transition: 'background 140ms ease, color 140ms ease' }}>
+                    {m}
+                  </button>
+                )
+              })}
+            </div>
           )}
           {lasso && (
             <div style={{ position: 'absolute', top: 10, left: '50%', transform: 'translateX(-50%)', zIndex: 6,
