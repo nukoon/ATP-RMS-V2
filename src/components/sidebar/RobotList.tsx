@@ -33,7 +33,7 @@ function RobotCard({ robot: r, selected, onClick }: { robot: Robot; selected: bo
       style={{
         padding: selected ? '8px 10px 8px 10px' : '8px 12px',
         borderBottom: '1px solid rgba(212,218,227,0.9)',
-        borderLeft: selected ? `2px solid #2563eb` : '2px solid transparent',
+        borderLeft: selected ? `2px solid var(--accent)` : '2px solid transparent',
         background: selected ? 'rgba(37,99,235,0.06)' : 'transparent',
         cursor: 'pointer',
         transition: 'background 0.15s',
@@ -41,8 +41,8 @@ function RobotCard({ robot: r, selected, onClick }: { robot: Robot; selected: bo
     >
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
         <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-          <span style={{ width: 9, height: 9, borderRadius: '50%', background: r.color ?? '#94a3b4', flexShrink: 0, border: '1px solid rgba(0,0,0,0.15)' }} />
-          <span style={{ fontFamily: 'Roboto Mono', fontSize: 11, color: '#1a2230' }}>{r.id}</span>
+          <span style={{ width: 9, height: 9, borderRadius: '50%', background: r.color ?? 'var(--text-faint)', flexShrink: 0, border: '1px solid rgba(0,0,0,0.15)' }} />
+          <span style={{ fontFamily: 'Roboto Mono', fontSize: 11, color: 'var(--text)' }}>{r.id}</span>
         </span>
         <span style={{
           fontSize: 8, padding: '1px 5px', borderRadius: 2, fontWeight: 700, letterSpacing: 1,
@@ -54,15 +54,15 @@ function RobotCard({ robot: r, selected, onClick }: { robot: Robot; selected: bo
       <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
         <img src={imgSrc} style={{ width: 60, height: 60, objectFit: 'contain', flexShrink: 0 }} />
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2, fontSize: 9, color: '#64748b' }}>
-            <span>Bat: <b style={{ color: '#1a2230' }}>{Math.round(r.battery.batteryCharge)}%</b></span>
-            <span>Spd: <b style={{ color: '#1a2230' }}>{r.velocity.vx.toFixed(1)}m/s</b></span>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2, fontSize: 9, color: 'var(--text-muted)' }}>
+            <span>Bat: <b style={{ color: 'var(--text)' }}>{Math.round(r.battery.batteryCharge)}%</b></span>
+            <span>Spd: <b style={{ color: 'var(--text)' }}>{r.velocity.vx.toFixed(1)}m/s</b></span>
             <span style={{ gridColumn: '1/-1' }}>
-              θ: <b style={{ color: '#1a2230' }}>{r.pose.theta.toFixed(0)}°</b>
+              θ: <b style={{ color: 'var(--text)' }}>{r.pose.theta.toFixed(0)}°</b>
               &nbsp;&nbsp;{r.currentNodeId}
             </span>
           </div>
-          <div style={{ height: 2, background: '#d4dae3', borderRadius: 2, overflow: 'hidden', marginTop: 3 }}>
+          <div style={{ height: 2, background: 'var(--border)', borderRadius: 2, overflow: 'hidden', marginTop: 3 }}>
             <div style={{ height: '100%', width: '100%', background: batCol, borderRadius: 2, transform: `scaleX(${r.battery.batteryCharge / 100})`, transformOrigin: 'left', transition: 'transform 0.5s' }} />
           </div>
         </div>

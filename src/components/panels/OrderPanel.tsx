@@ -14,8 +14,8 @@ import { mqttService } from '@/services/mqtt.service'
 import { buildVda5050Order } from '@/services/order.service'
 
 const STATUS_COLOR: Record<Mission['status'], string> = {
-  PENDING:   '#64748b',
-  ASSIGNED:  '#2563eb',
+  PENDING:   'var(--text-muted)',
+  ASSIGNED:  'var(--accent)',
   EXECUTING: '#16a34a',
   FINISHED:  '#15803d',
   FAILED:    '#dc2626',
@@ -96,23 +96,23 @@ export function OrderPanel({ onManageStorage }: { onManageStorage?: () => void }
   return (
     <div style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden', flex: 1 }}>
       <div style={{ display: 'flex', alignItems: 'center', padding: '8px 12px 6px' }}>
-        <span style={{ fontSize: 9, letterSpacing: 2, color: '#64748b', textTransform: 'uppercase' }}>
-          Missions — <span style={{ color: '#2563eb', fontFamily: 'Roboto Mono' }}>{activeCount} active</span>
+        <span style={{ fontSize: 9, letterSpacing: 2, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
+          Missions — <span style={{ color: 'var(--accent)', fontFamily: 'Roboto Mono' }}>{activeCount} active</span>
         </span>
         {onManageStorage && (
           <button onClick={onManageStorage} title="Manage storages"
-            style={{ marginLeft: 'auto', fontSize: 8, color: '#64748b', background: 'transparent', border: '1px solid #d4dae3', borderRadius: 2, cursor: 'pointer', padding: '2px 6px', fontFamily: 'Roboto Mono' }}>⚙ STORAGE</button>
+            style={{ marginLeft: 'auto', fontSize: 8, color: 'var(--text-muted)', background: 'transparent', border: '1px solid var(--border)', borderRadius: 2, cursor: 'pointer', padding: '2px 6px', fontFamily: 'Roboto Mono' }}>⚙ STORAGE</button>
         )}
       </div>
 
       {/* Create form */}
-      <div style={{ padding: '0 12px 8px', borderBottom: '1px solid #d4dae3', display: 'grid', gap: 5 }}>
+      <div style={{ padding: '0 12px 8px', borderBottom: '1px solid var(--border)', display: 'grid', gap: 5 }}>
         {/* mode toggle: single storage vs batch (area) */}
         <div style={{ display: 'flex', gap: 4 }}>
           {(['single', 'batch'] as const).map(m => (
             <button key={m} onClick={() => setMode(m)}
               style={{ flex: 1, fontSize: 9, padding: '3px 0', borderRadius: 2, cursor: 'pointer', fontFamily: 'Roboto Mono',
-                color: mode === m ? '#2563eb' : '#64748b', border: `1px solid ${mode === m ? 'rgba(37,99,235,0.4)' : '#d4dae3'}`,
+                color: mode === m ? 'var(--accent)' : 'var(--text-muted)', border: `1px solid ${mode === m ? 'rgba(37,99,235,0.4)' : 'var(--border)'}`,
                 background: mode === m ? 'rgba(37,99,235,0.08)' : 'transparent' }}>
               {m === 'single' ? 'SINGLE' : 'BATCH (AREA)'}
             </button>
@@ -127,16 +127,16 @@ export function OrderPanel({ onManageStorage }: { onManageStorage?: () => void }
           <>
             <AreaSelect label="Pick area" value={pAreaId} options={pickAreas} counts={a => countIn(a, pickups)} onChange={setPArea} empty="No area with FULL pickups" />
             <AreaSelect label="Drop area" value={dAreaId} options={dropAreas} counts={a => countIn(a, dropoffs)} onChange={setDArea} empty="No area with EMPTY dropoffs" />
-            <div style={{ fontSize: 8, color: '#94a3b4' }}>
+            <div style={{ fontSize: 8, color: 'var(--text-faint)' }}>
               Creates {Math.min(countIn(pAreaId, pickups), countIn(dAreaId, dropoffs)) || 0} mission(s) — FULL pickups paired with EMPTY dropoffs.
             </div>
           </>
         )}
         <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-          <span style={{ fontSize: 9, color: '#64748b', width: 42 }}>Prio</span>
+          <span style={{ fontSize: 9, color: 'var(--text-muted)', width: 42 }}>Prio</span>
           <input type="range" min={1} max={9} value={priority} onChange={e => setPriority(+e.target.value)}
-            style={{ flex: 1, accentColor: '#2563eb', height: 3 }} />
-          <span style={{ fontFamily: 'Roboto Mono', fontSize: 10, color: '#2563eb', width: 12 }}>{priority}</span>
+            style={{ flex: 1, accentColor: 'var(--accent)', height: 3 }} />
+          <span style={{ fontFamily: 'Roboto Mono', fontSize: 10, color: 'var(--accent)', width: 12 }}>{priority}</span>
         </div>
         <button onClick={create} disabled={!canCreate}
           style={{ padding: '5px 0', fontSize: 10, fontWeight: 600, letterSpacing: 1, borderRadius: 2,
@@ -145,20 +145,20 @@ export function OrderPanel({ onManageStorage }: { onManageStorage?: () => void }
           {busy ? '… CREATING' : mode === 'batch' ? '+ CREATE BATCH' : '+ CREATE MISSION'}
         </button>
         {err && <div style={{ fontSize: 9, color: '#dc2626' }}>{err}</div>}
-        {!storages.length && <div style={{ fontSize: 9, color: '#94a3b4' }}>No storages yet — add some in the STORAGE tab.</div>}
+        {!storages.length && <div style={{ fontSize: 9, color: 'var(--text-faint)' }}>No storages yet — add some in the STORAGE tab.</div>}
       </div>
 
       {/* List */}
       <div style={{ overflowY: 'auto', flex: 1 }}>
-        {missions.length === 0 && <div style={{ fontSize: 10, color: '#94a3b4', padding: '10px 12px' }}>No missions yet</div>}
+        {missions.length === 0 && <div style={{ fontSize: 10, color: 'var(--text-faint)', padding: '10px 12px' }}>No missions yet</div>}
         {missions.slice(0, 40).map(m => (
           <div key={m.id} style={{ padding: '6px 12px', borderBottom: '1px solid rgba(212,218,227,0.6)' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 6 }}>
-              <span style={{ fontFamily: 'Roboto Mono', fontSize: 10, color: '#2563eb' }}>{m.missionNo}</span>
+              <span style={{ fontFamily: 'Roboto Mono', fontSize: 10, color: 'var(--accent)' }}>{m.missionNo}</span>
               <span style={{ display: 'flex', alignItems: 'center', gap: 4, marginLeft: 'auto' }}>
                 {/* priority chip — P1 (urgent) is highlighted red */}
                 <span title={`Priority ${m.priority}`} style={{ fontSize: 8, fontFamily: 'Roboto Mono', fontWeight: 700, padding: '1px 4px', borderRadius: 2,
-                  color: m.priority <= 1 ? '#dc2626' : '#64748b', border: `1px solid ${m.priority <= 1 ? 'rgba(220,38,38,0.4)' : '#d4dae3'}`,
+                  color: m.priority <= 1 ? '#dc2626' : 'var(--text-muted)', border: `1px solid ${m.priority <= 1 ? 'rgba(220,38,38,0.4)' : 'var(--border)'}`,
                   background: m.priority <= 1 ? 'rgba(220,38,38,0.08)' : 'transparent' }}>
                   P{m.priority}
                 </span>
@@ -174,14 +174,14 @@ export function OrderPanel({ onManageStorage }: { onManageStorage?: () => void }
                 </span>
               </span>
             </div>
-            <div style={{ fontSize: 9, color: '#64748b', marginTop: 2 }}>
-              {(m.pickupStorageName || m.startNode)} → {(m.dropoffStorageName || m.endNode)} {m.agvId && <span style={{ color: '#1a2230' }}>· {m.agvId}</span>}
+            <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 2 }}>
+              {(m.pickupStorageName || m.startNode)} → {(m.dropoffStorageName || m.endNode)} {m.agvId && <span style={{ color: 'var(--text)' }}>· {m.agvId}</span>}
             </div>
             {!!m.actions?.length && (
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3, marginTop: 3 }}>
                 {m.actions.map((a, i) => (
                   <span key={i} style={{ fontSize: 8, fontFamily: 'Roboto Mono', padding: '0 4px', borderRadius: 2,
-                    color: a.stage === 'PICK' ? '#2563eb' : '#f59e0b',
+                    color: a.stage === 'PICK' ? 'var(--accent)' : '#f59e0b',
                     border: `1px solid ${a.stage === 'PICK' ? 'rgba(37,99,235,0.3)' : 'rgba(245,158,11,0.3)'}` }}>
                     {a.actionType}
                   </span>
@@ -190,10 +190,10 @@ export function OrderPanel({ onManageStorage }: { onManageStorage?: () => void }
             )}
             {(m.status === 'EXECUTING' || m.status === 'ASSIGNED') && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4 }}>
-                <div style={{ flex: 1, height: 3, background: '#d4dae3', borderRadius: 2, overflow: 'hidden' }}>
+                <div style={{ flex: 1, height: 3, background: 'var(--border)', borderRadius: 2, overflow: 'hidden' }}>
                   <div style={{ height: '100%', width: '100%', background: '#16a34a', transform: `scaleX(${m.progress / 100})`, transformOrigin: 'left', transition: 'transform 0.4s' }} />
                 </div>
-                <span style={{ fontFamily: 'Roboto Mono', fontSize: 9, color: '#64748b' }}>{m.progress}%</span>
+                <span style={{ fontFamily: 'Roboto Mono', fontSize: 9, color: 'var(--text-muted)' }}>{m.progress}%</span>
                 <button onClick={() => cancelMission(m.id)} title="Cancel"
                   style={{ background: 'transparent', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: 12, lineHeight: 1, padding: 0 }}>×</button>
               </div>
@@ -209,15 +209,15 @@ function AreaSelect({ label, value, options, counts, onChange, empty }:
   { label: string; value: string; options: StorageArea[]; counts: (areaId: string) => number; onChange: (v: string) => void; empty: string }) {
   return (
     <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-      <span style={{ fontSize: 9, color: '#64748b', width: 42 }}>{label}</span>
+      <span style={{ fontSize: 9, color: 'var(--text-muted)', width: 42 }}>{label}</span>
       {options.length ? (
         <select value={value} onChange={e => onChange(e.target.value)}
-          style={{ flex: 1, fontSize: 10, fontFamily: 'Roboto Mono', background: '#f3f6fa', color: '#1a2230',
-            border: '1px solid #d4dae3', borderRadius: 2, padding: '3px 4px' }}>
+          style={{ flex: 1, fontSize: 10, fontFamily: 'Roboto Mono', background: 'var(--surface-2)', color: 'var(--text)',
+            border: '1px solid var(--border)', borderRadius: 2, padding: '3px 4px' }}>
           {options.map(a => <option key={a.id} value={a.id}>{a.name} ({counts(a.id)})</option>)}
         </select>
       ) : (
-        <span style={{ flex: 1, fontSize: 9, color: '#94a3b4', fontStyle: 'italic' }}>{empty}</span>
+        <span style={{ flex: 1, fontSize: 9, color: 'var(--text-faint)', fontStyle: 'italic' }}>{empty}</span>
       )}
     </div>
   )
@@ -227,15 +227,15 @@ function StorageSelect({ label, value, options, onChange, empty }:
   { label: string; value: string; options: Storage[]; onChange: (v: string) => void; empty: string }) {
   return (
     <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-      <span style={{ fontSize: 9, color: '#64748b', width: 42 }}>{label}</span>
+      <span style={{ fontSize: 9, color: 'var(--text-muted)', width: 42 }}>{label}</span>
       {options.length ? (
         <select value={value} onChange={e => onChange(e.target.value)}
-          style={{ flex: 1, fontSize: 10, fontFamily: 'Roboto Mono', background: '#f3f6fa', color: '#1a2230',
-            border: '1px solid #d4dae3', borderRadius: 2, padding: '3px 4px' }}>
+          style={{ flex: 1, fontSize: 10, fontFamily: 'Roboto Mono', background: 'var(--surface-2)', color: 'var(--text)',
+            border: '1px solid var(--border)', borderRadius: 2, padding: '3px 4px' }}>
           {options.map(s => <option key={s.id} value={s.id}>{s.name} @ {s.nodeId}</option>)}
         </select>
       ) : (
-        <span style={{ flex: 1, fontSize: 9, color: '#94a3b4', fontStyle: 'italic' }}>{empty}</span>
+        <span style={{ flex: 1, fontSize: 9, color: 'var(--text-faint)', fontStyle: 'italic' }}>{empty}</span>
       )}
     </div>
   )

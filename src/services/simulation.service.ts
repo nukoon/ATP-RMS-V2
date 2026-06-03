@@ -663,15 +663,17 @@ export class SimulationService {
   /** Dwell finished at a station → advance to the next leg of the mission. */
   private afterDwell(store: ReturnType<typeof useFleetStore.getState>, b: SimBot) {
     if (b.phase === 'AT_PICKUP') {
-      // load picked up → now carrying → route pickup → dropoff
+      // load picked up → now carrying; the pickup storage empties right away so
+      // the box leaves the rack and rides on the forks only (not in both places)
       store.setRobotCarrying(b.id, true)
+      if (b.pickupStorageId) useStorageStore.getState().setState(b.pickupStorageId, 'EMPTY').catch(() => {})
       const path = this.shortestPath(b.node, b.dropoffNode)
       if (path) { b.route = path; b.edge = path[0] ?? null; b.t = 0; b.phase = 'TO_DROPOFF'; b.status = 'EXECUTING'; if (!b.edge) this.onArrive(store, b) }
       else { if (b.missionId) store.updateMission(b.missionId, { status: 'FAILED' }); b.missionId = null; store.setRobotCarrying(b.id, false); this.sendHome(b) }
     } else if (b.phase === 'AT_DROPOFF') {
-      // delivery complete → drop the load, flip storage states, finish, go home
+      // delivery complete → drop the load, fill the dropoff (pickup already
+      // emptied at pick time), finish, go home
       store.setRobotCarrying(b.id, false)
-      if (b.pickupStorageId)  useStorageStore.getState().setState(b.pickupStorageId, 'EMPTY').catch(() => {})
       if (b.dropoffStorageId) useStorageStore.getState().setState(b.dropoffStorageId, 'FULL').catch(() => {})
       if (b.missionId) { store.updateMission(b.missionId, { status: 'FINISHED', progress: 100, finishedAt: new Date().toISOString() }); store.recordOrderCompleted() }
       b.missionId = null; b.actions = []; b.pickupStorageId = null; b.dropoffStorageId = null

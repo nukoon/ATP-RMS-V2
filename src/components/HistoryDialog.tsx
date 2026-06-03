@@ -10,7 +10,7 @@ import { api, ApiError } from '@/services/api'
 
 const STATUSES: Mission['status'][] = ['PENDING', 'ASSIGNED', 'EXECUTING', 'FINISHED', 'FAILED', 'CANCELLED']
 const STATUS_COLOR: Record<Mission['status'], string> = {
-  PENDING: '#64748b', ASSIGNED: '#2563eb', EXECUTING: '#16a34a',
+  PENDING: 'var(--text-muted)', ASSIGNED: 'var(--accent)', EXECUTING: '#16a34a',
   FINISHED: '#15803d', FAILED: '#dc2626', CANCELLED: '#b45309',
 }
 
@@ -88,17 +88,17 @@ export function HistoryDialog({ onClose }: { onClose: () => void }) {
   return (
     <div onClick={onClose} style={ovl}>
       <div onClick={e => e.stopPropagation()} style={panel}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', borderBottom: '1px solid #d4dae3' }}>
-          <span style={{ fontFamily: 'Roboto Mono', fontSize: 11, letterSpacing: 2, color: '#2563eb' }}>📋 TASK HISTORY</span>
-          <span style={{ fontSize: 10, color: '#64748b' }}>{filtered.length} / {rows.length} record(s)</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', borderBottom: '1px solid var(--border)' }}>
+          <span style={{ fontFamily: 'Roboto Mono', fontSize: 11, letterSpacing: 2, color: 'var(--accent)' }}>📋 TASK HISTORY</span>
+          <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{filtered.length} / {rows.length} record(s)</span>
           <button onClick={load} title="Reload" style={{ ...miniBtn, marginLeft: 8 }}>↻ RELOAD</button>
           <button onClick={exportCsv} disabled={!filtered.length}
             style={{ ...miniBtn, color: '#16a34a', border: '1px solid rgba(22,163,74,0.4)', background: 'rgba(22,163,74,0.08)', opacity: filtered.length ? 1 : 0.4 }}>⤓ EXPORT CSV</button>
-          <button onClick={onClose} style={{ marginLeft: 'auto', background: 'transparent', border: 'none', color: '#64748b', cursor: 'pointer', fontSize: 18 }}>×</button>
+          <button onClick={onClose} style={{ marginLeft: 'auto', background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: 18 }}>×</button>
         </div>
 
         {/* filter bar */}
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'end', padding: '10px 14px', borderBottom: '1px solid #d4dae3', background: '#f3f6fa' }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'end', padding: '10px 14px', borderBottom: '1px solid var(--border)', background: 'var(--surface-2)' }}>
           <Field label="Search"><input value={q} onChange={e => setQ(e.target.value)} placeholder="mission / storage / node" style={{ ...inp, width: 180 }} /></Field>
           <Field label="Status">
             <select value={status} onChange={e => setStatus(e.target.value)} style={{ ...inp, width: 110 }}>
@@ -123,34 +123,34 @@ export function HistoryDialog({ onClose }: { onClose: () => void }) {
         {/* table */}
         <div style={{ overflow: 'auto', flex: 1 }}>
           {err && <div style={{ padding: 14, fontSize: 11, color: '#dc2626' }}>{err}</div>}
-          {loading && <div style={{ padding: 14, fontSize: 11, color: '#94a3b4' }}>Loading…</div>}
+          {loading && <div style={{ padding: 14, fontSize: 11, color: 'var(--text-faint)' }}>Loading…</div>}
           {!loading && !err && (
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 10.5, fontFamily: 'Roboto Mono' }}>
               <thead>
-                <tr style={{ position: 'sticky', top: 0, background: '#eef1f5', textAlign: 'left', color: '#64748b' }}>
+                <tr style={{ position: 'sticky', top: 0, background: 'var(--bg)', textAlign: 'left', color: 'var(--text-muted)' }}>
                   {['Mission', 'Type', 'Status', 'Prio', 'AGV', 'Pickup → Dropoff', 'Progress', 'Duration', 'Created'].map(h => (
-                    <th key={h} style={{ padding: '6px 8px', borderBottom: '1px solid #d4dae3', whiteSpace: 'nowrap' }}>{h}</th>
+                    <th key={h} style={{ padding: '6px 8px', borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap' }}>{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 {filtered.map(m => (
                   <tr key={m.id} style={{ borderBottom: '1px solid rgba(212,218,227,0.6)' }}>
-                    <td style={{ padding: '5px 8px', color: '#2563eb' }}>{m.missionNo}</td>
-                    <td style={{ padding: '5px 8px', color: '#4a5568' }}>{m.type}</td>
+                    <td style={{ padding: '5px 8px', color: 'var(--accent)' }}>{m.missionNo}</td>
+                    <td style={{ padding: '5px 8px', color: 'var(--text-2)' }}>{m.type}</td>
                     <td style={{ padding: '5px 8px' }}>
                       <span style={{ color: STATUS_COLOR[m.status], fontWeight: 700 }}>{m.status}</span>
                     </td>
-                    <td style={{ padding: '5px 8px', color: m.priority <= 1 ? '#dc2626' : '#64748b' }}>P{m.priority}</td>
-                    <td style={{ padding: '5px 8px', color: '#1a2230' }}>{m.agvId ?? '—'}</td>
-                    <td style={{ padding: '5px 8px', color: '#4a5568' }}>{(m.pickupStorageName || m.startNode)} → {(m.dropoffStorageName || m.endNode)}</td>
-                    <td style={{ padding: '5px 8px', color: '#4a5568' }}>{m.progress}%</td>
-                    <td style={{ padding: '5px 8px', color: '#4a5568' }}>{fmtDur(durationSec(m))}</td>
-                    <td style={{ padding: '5px 8px', color: '#94a3b4', whiteSpace: 'nowrap' }}>{fmtTs(m.createdAt)}</td>
+                    <td style={{ padding: '5px 8px', color: m.priority <= 1 ? '#dc2626' : 'var(--text-muted)' }}>P{m.priority}</td>
+                    <td style={{ padding: '5px 8px', color: 'var(--text)' }}>{m.agvId ?? '—'}</td>
+                    <td style={{ padding: '5px 8px', color: 'var(--text-2)' }}>{(m.pickupStorageName || m.startNode)} → {(m.dropoffStorageName || m.endNode)}</td>
+                    <td style={{ padding: '5px 8px', color: 'var(--text-2)' }}>{m.progress}%</td>
+                    <td style={{ padding: '5px 8px', color: 'var(--text-2)' }}>{fmtDur(durationSec(m))}</td>
+                    <td style={{ padding: '5px 8px', color: 'var(--text-faint)', whiteSpace: 'nowrap' }}>{fmtTs(m.createdAt)}</td>
                   </tr>
                 ))}
                 {!filtered.length && (
-                  <tr><td colSpan={9} style={{ padding: 16, color: '#94a3b4', textAlign: 'center' }}>No matching tasks</td></tr>
+                  <tr><td colSpan={9} style={{ padding: 16, color: 'var(--text-faint)', textAlign: 'center' }}>No matching tasks</td></tr>
                 )}
               </tbody>
             </table>
@@ -163,12 +163,12 @@ export function HistoryDialog({ onClose }: { onClose: () => void }) {
 
 const Field = ({ label, children }: { label: string; children: React.ReactNode }) => (
   <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-    <span style={{ fontSize: 8, letterSpacing: 1, color: '#64748b', textTransform: 'uppercase' }}>{label}</span>
+    <span style={{ fontSize: 8, letterSpacing: 1, color: 'var(--text-muted)', textTransform: 'uppercase' }}>{label}</span>
     {children}
   </div>
 )
 
 const ovl: React.CSSProperties = { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }
-const panel: React.CSSProperties = { width: 'min(1000px, 94vw)', height: '86vh', background: '#ffffff', border: '1px solid #d4dae3', borderRadius: 4, display: 'flex', flexDirection: 'column', overflow: 'hidden', fontFamily: 'Inter, "Noto Sans JP", sans-serif', color: '#1a2230' }
-const inp: React.CSSProperties = { background: '#ffffff', color: '#1a2230', border: '1px solid #d4dae3', borderRadius: 2, padding: '5px 7px', fontSize: 10, fontFamily: 'Roboto Mono', boxSizing: 'border-box' }
-const miniBtn: React.CSSProperties = { fontSize: 9, padding: '4px 8px', borderRadius: 2, cursor: 'pointer', color: '#64748b', border: '1px solid #d4dae3', background: 'transparent', fontFamily: 'Roboto Mono' }
+const panel: React.CSSProperties = { width: 'min(1000px, 94vw)', height: '86vh', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 4, display: 'flex', flexDirection: 'column', overflow: 'hidden', fontFamily: 'Inter, "Noto Sans JP", sans-serif', color: 'var(--text)' }
+const inp: React.CSSProperties = { background: 'var(--surface)', color: 'var(--text)', border: '1px solid var(--border)', borderRadius: 2, padding: '5px 7px', fontSize: 10, fontFamily: 'Roboto Mono', boxSizing: 'border-box' }
+const miniBtn: React.CSSProperties = { fontSize: 9, padding: '4px 8px', borderRadius: 2, cursor: 'pointer', color: 'var(--text-muted)', border: '1px solid var(--border)', background: 'transparent', fontFamily: 'Roboto Mono' }

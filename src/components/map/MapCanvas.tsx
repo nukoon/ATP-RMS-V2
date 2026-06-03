@@ -8,6 +8,7 @@ import type { Storage, Dock, StorageArea, TrafficArea } from '@/types/fleet'
 import type { Transform } from '@/utils/canvas'
 import { worldToScreen, screenToWorld, thetaToScreenRot } from '@/utils/canvas'
 import { STATUS_COLOR, AGV_ASSET_PATH } from '@/constants'
+import { getCanvas } from '@/theme'
 import { useStorageStore } from '@/store/storage.store'
 import { useFleetStore } from '@/store/fleet.store'
 import type { useMapTransform } from '@/hooks/useMapTransform'
@@ -113,7 +114,7 @@ export function MapCanvas({ map, robots, config, selectedRobotId, onRobotClick, 
     const tt = tRef.current
     ctx.clearRect(0, 0, canvas.width, canvas.height)
 
-    drawGrid(ctx, canvas.width, canvas.height, tt)
+    if (config.showGrid) drawGrid(ctx, canvas.width, canvas.height, tt)
     drawAxes(ctx, tt)
     drawEdges(ctx, map, tt, config)
     if (config.showHeatmap) drawEdgeHeat(ctx, map, edgeHeatRef.current, tt)
@@ -127,7 +128,7 @@ export function MapCanvas({ map, robots, config, selectedRobotId, onRobotClick, 
     drawNodes(ctx, map, tt, config, storageNodes)
     if (config.showStorage) drawDocks(ctx, map, docksRef.current, tt)
     if (config.showStorage) drawStorages(ctx, map, storagesRef.current, occupiedRef.current, tt, config)
-    robots.forEach(r => drawRobot(ctx, r, tt, config, selectedRobotId))
+    if (config.showRobots) robots.forEach(r => drawRobot(ctx, r, tt, config, selectedRobotId))
 
     // highlight the clicked node
     const sn = selectedNodeRef.current
@@ -289,9 +290,9 @@ function NodeInfoCard({ node, sx, sy, onClose }: { node: MapPoint; sx: number; s
   return (
     <div onClick={e => e.stopPropagation()}
       style={{ position: 'absolute', left: Math.max(6, sx + 14), top: Math.max(6, sy + 14), zIndex: 6,
-        minWidth: 168, background: '#ffffff', border: '1px solid #d4dae3',
-        borderRadius: 8, boxShadow: '0 8px 24px rgba(26,34,48,0.14)', padding: '9px 11px 10px',
-        fontFamily: 'Inter, "Noto Sans JP", sans-serif', color: '#1a2230' }}>
+        minWidth: 168, background: 'var(--surface)', border: '1px solid var(--border)',
+        borderRadius: 8, boxShadow: '0 8px 24px rgba(0,0,0,0.28)', padding: '9px 11px 10px',
+        fontFamily: 'Inter, "Noto Sans JP", sans-serif', color: 'var(--text)' }}>
       {/* class chip (dot + label, not a colored side-stripe) + close */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 9, fontWeight: 700,
@@ -305,16 +306,16 @@ function NodeInfoCard({ node, sx, sy, onClose }: { node: MapPoint; sx: number; s
           onFocus={() => setCloseHover(true)} onBlur={() => setCloseHover(false)}
           style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', justifyContent: 'center',
             width: 20, height: 20, borderRadius: 5, border: 'none', cursor: 'pointer', outline: 'none',
-            color: closeHover ? '#dc2626' : '#94a3b4', background: closeHover ? 'rgba(220,38,38,0.08)' : 'transparent',
+            color: closeHover ? '#ef4444' : 'var(--text-faint)', background: closeHover ? 'rgba(220,38,38,0.12)' : 'transparent',
             fontSize: 15, lineHeight: 1, transition: 'background 130ms ease, color 130ms ease' }}>×</button>
       </div>
-      <div style={{ fontFamily: 'Roboto Mono', fontSize: 14, fontWeight: 700, color: '#1a2230', marginTop: 7 }}>{node.id}</div>
-      {node.name && node.name !== node.id && <div style={{ fontSize: 11, color: '#4a5568', marginTop: 1 }}>{node.name}</div>}
-      <div style={{ height: 1, background: '#eef1f5', margin: '8px 0 7px' }} />
-      <div style={{ fontFamily: 'Roboto Mono', fontSize: 11, color: '#1a2230', display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '3px 10px' }}>
-        <span style={{ color: '#64748b' }}>X</span><span>{node.x.toFixed(3)} m</span>
-        <span style={{ color: '#64748b' }}>Y</span><span>{node.y.toFixed(3)} m</span>
-        <span style={{ color: '#64748b' }}>θ</span><span>{node.theta.toFixed(1)}°</span>
+      <div style={{ fontFamily: 'Roboto Mono', fontSize: 14, fontWeight: 700, color: 'var(--text)', marginTop: 7 }}>{node.id}</div>
+      {node.name && node.name !== node.id && <div style={{ fontSize: 11, color: 'var(--text-2)', marginTop: 1 }}>{node.name}</div>}
+      <div style={{ height: 1, background: 'var(--border)', margin: '8px 0 7px' }} />
+      <div style={{ fontFamily: 'Roboto Mono', fontSize: 11, color: 'var(--text)', display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '3px 10px' }}>
+        <span style={{ color: 'var(--text-muted)' }}>X</span><span>{node.x.toFixed(3)} m</span>
+        <span style={{ color: 'var(--text-muted)' }}>Y</span><span>{node.y.toFixed(3)} m</span>
+        <span style={{ color: 'var(--text-muted)' }}>θ</span><span>{node.theta.toFixed(1)}°</span>
       </div>
     </div>
   )
@@ -331,7 +332,7 @@ function ZoomBtn({ icon, onClick, title }: { icon: ReactNode; onClick: () => voi
       onFocus={() => setHover(true)} onBlur={() => setHover(false)}
       style={{ width: 32, height: 30, display: 'flex', alignItems: 'center', justifyContent: 'center',
         border: 'none', padding: 0, cursor: 'pointer', outline: 'none',
-        color: hover ? '#2563eb' : '#4a5568', background: hover ? '#eef4ff' : '#ffffff',
+        color: hover ? 'var(--accent)' : 'var(--text-2)', background: hover ? 'var(--surface-2)' : 'var(--surface)',
         transition: 'background 140ms ease, color 140ms ease' }}>
       {icon}
     </button>
@@ -340,16 +341,16 @@ function ZoomBtn({ icon, onClick, title }: { icon: ReactNode; onClick: () => voi
 function ZoomControl({ ctrl }: { ctrl: ReturnType<typeof useMapTransform> }) {
   return (
     <div style={{ position: 'absolute', right: 14, bottom: 14, zIndex: 6, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, userSelect: 'none' }}>
-      <div style={{ display: 'flex', flexDirection: 'column', background: '#ffffff', border: '1px solid #d4dae3',
-        borderRadius: 9, boxShadow: '0 4px 16px rgba(26,34,48,0.14)', overflow: 'hidden' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', background: 'var(--surface)', border: '1px solid var(--border)',
+        borderRadius: 9, boxShadow: '0 4px 16px rgba(0,0,0,0.28)', overflow: 'hidden' }}>
         <ZoomBtn title="Zoom in" onClick={ctrl.zoomIn} icon={<svg {...zoomIconProps}><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>} />
-        <div style={{ height: 1, background: '#e7ebf1' }} />
+        <div style={{ height: 1, background: 'var(--border)' }} />
         <ZoomBtn title="Zoom out" onClick={ctrl.zoomOut} icon={<svg {...zoomIconProps}><line x1="5" y1="12" x2="19" y2="12" /></svg>} />
-        <div style={{ height: 1, background: '#e7ebf1' }} />
+        <div style={{ height: 1, background: 'var(--border)' }} />
         <ZoomBtn title="Fit to view" onClick={() => ctrl.fitToCanvas()} icon={<svg {...zoomIconProps}><path d="M8 3H5a2 2 0 0 0-2 2v3" /><path d="M21 8V5a2 2 0 0 0-2-2h-3" /><path d="M3 16v3a2 2 0 0 0 2 2h3" /><path d="M16 21h3a2 2 0 0 0 2-2v-3" /></svg>} />
       </div>
-      <span style={{ fontFamily: 'Roboto Mono, "Noto Sans JP", monospace', fontSize: 10, color: '#4a5568',
-        background: 'rgba(255,255,255,0.88)', padding: '1px 6px', borderRadius: 5, border: '1px solid #e7ebf1' }}>
+      <span style={{ fontFamily: 'Roboto Mono, "Noto Sans JP", monospace', fontSize: 10, color: 'var(--text-2)',
+        background: 'var(--surface)', padding: '1px 6px', borderRadius: 5, border: '1px solid var(--border)' }}>
         {ctrl.transform.scale.toFixed(2)}×
       </span>
     </div>
@@ -361,7 +362,7 @@ function ZoomControl({ ctrl }: { ctrl: ReturnType<typeof useMapTransform> }) {
 function drawGrid(ctx: CanvasRenderingContext2D, w: number, h: number, t: Transform) {
   const step = 5 * t.scale
   if (step < 8) return
-  ctx.strokeStyle = 'rgba(100,116,139,0.10)'
+  ctx.strokeStyle = getCanvas().grid
   ctx.lineWidth = 1
   for (let x = ((t.offsetX % step) + step) % step; x < w; x += step) {
     ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke()
@@ -438,7 +439,7 @@ function drawStorages(ctx: CanvasRenderingContext2D, map: FleetMap, storages: St
     const box = { x1: L.sx - lw / 2 - 2, y1: ly - lblPx, x2: L.sx + lw / 2 + 2, y2: ly + 3 }
     if (placed.some(q => box.x1 < q.x2 && box.x2 > q.x1 && box.y1 < q.y2 && box.y2 > q.y1)) continue
     placed.push(box)
-    ctx.fillStyle = 'rgba(255,255,255,0.85)'
+    ctx.fillStyle = getCanvas().labelBg
     ctx.fillRect(box.x1, ly - lblPx, lw + 4, lblPx + 3)
     ctx.fillStyle = L.col
     ctx.fillText(L.text, L.sx, ly)
@@ -522,10 +523,10 @@ function drawTrafficAreas(ctx: CanvasRenderingContext2D, map: FleetMap, zones: T
 // DOCKS: parking & charging points — a solid colour badge with a white glyph
 // (⚡ bolt for CHARGE, P for PARK) so they read clearly over the lanes/nodes.
 const DOCK_ICON = { PARK: '/assets/icons/standbyStation.svg', CHARGE: '/assets/icons/chargeStation.svg' }
-const DOCK_M = 1.6   // badge footprint in metres (scales true-to-map, with a floor)
+const DOCK_M = 1.05  // badge footprint in metres (scales true-to-map, with a floor)
 
 function drawDocks(ctx: CanvasRenderingContext2D, map: FleetMap, docks: Dock[], t: Transform) {
-  const sz = Math.max(18, DOCK_M * t.scale)
+  const sz = Math.max(13, DOCK_M * t.scale)
   const half = sz / 2
   const rad = sz * 0.28
   for (const d of docks) {
@@ -562,7 +563,7 @@ function drawDocks(ctx: CanvasRenderingContext2D, map: FleetMap, docks: Dock[], 
       ctx.textAlign = 'center'
       const lw = ctx.measureText(d.agvId).width
       const ly = sy + half + Math.max(9, sz * 0.34)
-      ctx.fillStyle = 'rgba(255,255,255,0.85)'; ctx.fillRect(sx - lw / 2 - 2, ly - Math.max(8, sz * 0.34), lw + 4, Math.max(10, sz * 0.4))
+      ctx.fillStyle = getCanvas().labelBg; ctx.fillRect(sx - lw / 2 - 2, ly - Math.max(8, sz * 0.34), lw + 4, Math.max(10, sz * 0.4))
       ctx.fillStyle = col; ctx.fillText(d.agvId, sx, ly)
     }
   }
@@ -617,8 +618,9 @@ function drawAxes(ctx: CanvasRenderingContext2D, t: Transform) {
 function drawEdges(ctx: CanvasRenderingContext2D, map: FleetMap, t: Transform, cfg: MapViewConfig) {
   if (!cfg.showEdges) return
   const lw = Math.max(0.75, t.scale * 0.12)
-  const EDGE = 'rgba(143,166,197,0.92)'   // soft steel-blue lane
-  const ARROW = 'rgba(90,124,166,0.95)'   // a darker shade of the lane, in-family
+  const tc = getCanvas()
+  const EDGE = tc.edge          // soft steel-blue lane (theme-aware)
+  const ARROW = tc.edgeArrow    // a darker shade of the lane, in-family
   // round caps + joins keep bezier lanes smooth and modern (no harsh corners)
   ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.setLineDash([])
   for (const c of map.curves) {
@@ -731,6 +733,7 @@ function drawNodes(ctx: CanvasRenderingContext2D, map: FleetMap, t: Transform, c
   // display; the node dot above already carries the class colour, so the id
   // text stays a neutral ink for hierarchy (type vs. name read on two channels).
   const lblPx = Math.round(Math.max(9, Math.min(cfg.labelSize, t.scale * 1.2)))
+  const tc = getCanvas()
   ctx.font = `500 ${lblPx}px Roboto Mono, "Noto Sans JP", monospace`
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
   const padX = 4, padY = 2
@@ -745,9 +748,9 @@ function drawNodes(ctx: CanvasRenderingContext2D, map: FleetMap, t: Transform, c
     placed.push(box)
     // rounded chip lifts the id off the lanes/grid behind it
     ctx.beginPath(); ctx.roundRect(bx, by, bw, bh, 3)
-    ctx.fillStyle = 'rgba(255,255,255,0.92)'; ctx.fill()
-    ctx.lineWidth = 1; ctx.strokeStyle = 'rgba(208,215,226,0.85)'; ctx.stroke()
-    ctx.fillStyle = '#334155'
+    ctx.fillStyle = tc.labelBg; ctx.fill()
+    ctx.lineWidth = 1; ctx.strokeStyle = tc.labelBorder; ctx.stroke()
+    ctx.fillStyle = tc.labelText
     ctx.fillText(p.id, sx, cy + 0.5)
   }
   ctx.textBaseline = 'alphabetic'   // reset so other text (storage labels) is unaffected
@@ -869,7 +872,7 @@ function drawRobot(ctx: CanvasRenderingContext2D, r: Robot, t: Transform, cfg: M
   const lblSz = Math.max(8, cfg.labelSize - 1)
   ctx.font = `bold ${lblSz}px Roboto Mono, "Noto Sans JP", monospace`; ctx.textAlign = 'center'
   const lw = ctx.measureText(r.id).width; const lby = sy + half + lblSz + 4
-  ctx.fillStyle = 'rgba(255,255,255,0.85)'
+  ctx.fillStyle = getCanvas().labelBg
   ctx.fillRect(sx - lw / 2 - 2, lby - lblSz, lw + 4, lblSz + 2)
   ctx.fillStyle = idc; ctx.fillText(r.id, sx, lby)
   // Selection ring

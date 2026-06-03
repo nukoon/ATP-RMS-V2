@@ -31,16 +31,16 @@ export function TrafficAreaDialog({ nodeIds, onClose }: { nodeIds: string[]; onC
   return (
     <div onClick={onClose} style={ovl}>
       <div onClick={e => e.stopPropagation()} style={panel}>
-        <div style={{ display: 'flex', alignItems: 'center', padding: '10px 14px', borderBottom: '1px solid #d4dae3' }}>
+        <div style={{ display: 'flex', alignItems: 'center', padding: '10px 14px', borderBottom: '1px solid var(--border)' }}>
           <span style={{ fontFamily: 'Roboto Mono', fontSize: 11, letterSpacing: 2, color: '#dc2626' }}>⛒ NEW TRAFFIC AREA</span>
-          <button onClick={onClose} style={{ marginLeft: 'auto', background: 'transparent', border: 'none', color: '#64748b', cursor: 'pointer', fontSize: 18 }}>×</button>
+          <button onClick={onClose} style={{ marginLeft: 'auto', background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: 18 }}>×</button>
         </div>
         <div style={{ padding: 14, display: 'flex', flexDirection: 'column', gap: 12 }}>
           {done ? (
             <div style={{ fontSize: 12, color: '#16a34a' }}>✓ Created. Restart SIM to apply the new zone.</div>
           ) : (
             <>
-              <div style={{ fontSize: 11, color: '#4a5568' }}>
+              <div style={{ fontSize: 11, color: 'var(--text-2)' }}>
                 Zone over <b style={{ color: '#dc2626' }}>{nodeIds.length}</b> node(s). At most <b>{capacity}</b> AMR(s) inside at once — others wait outside.
               </div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, maxHeight: 90, overflowY: 'auto' }}>
@@ -70,10 +70,10 @@ export function TrafficAreaDialog({ nodeIds, onClose }: { nodeIds: string[]; onC
 }
 
 const Lbl = ({ children }: { children: React.ReactNode }) => (
-  <div style={{ fontSize: 9, letterSpacing: 1, color: '#64748b', textTransform: 'uppercase', marginBottom: 3 }}>{children}</div>
+  <div style={{ fontSize: 9, letterSpacing: 1, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 3 }}>{children}</div>
 )
 const ovl: React.CSSProperties = { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }
-const panel: React.CSSProperties = { width: 440, maxHeight: '84vh', background: '#ffffff', border: '1px solid #d4dae3', borderRadius: 4, display: 'flex', flexDirection: 'column', overflow: 'hidden', fontFamily: 'Inter, "Noto Sans JP", sans-serif', color: '#1a2230' }
-const inp: React.CSSProperties = { background: '#f3f6fa', color: '#1a2230', border: '1px solid #d4dae3', borderRadius: 2, padding: '5px 7px', fontSize: 10, fontFamily: 'Roboto Mono', width: '100%', boxSizing: 'border-box' }
+const panel: React.CSSProperties = { width: 440, maxHeight: '84vh', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 4, display: 'flex', flexDirection: 'column', overflow: 'hidden', fontFamily: 'Inter, "Noto Sans JP", sans-serif', color: 'var(--text)' }
+const inp: React.CSSProperties = { background: 'var(--surface-2)', color: 'var(--text)', border: '1px solid var(--border)', borderRadius: 2, padding: '5px 7px', fontSize: 10, fontFamily: 'Roboto Mono', width: '100%', boxSizing: 'border-box' }
 const primaryBtn: React.CSSProperties = { padding: '6px 14px', fontSize: 11, fontWeight: 600, letterSpacing: 1, borderRadius: 2, cursor: 'pointer', color: '#dc2626', border: '1px solid rgba(220,38,38,0.4)', background: 'rgba(220,38,38,0.08)' }
-const cancelBtn: React.CSSProperties = { padding: '6px 14px', fontSize: 11, fontWeight: 600, letterSpacing: 1, borderRadius: 2, cursor: 'pointer', color: '#64748b', border: '1px solid #d4dae3', background: 'transparent' }
+const cancelBtn: React.CSSProperties = { padding: '6px 14px', fontSize: 11, fontWeight: 600, letterSpacing: 1, borderRadius: 2, cursor: 'pointer', color: 'var(--text-muted)', border: '1px solid var(--border)', background: 'transparent' }

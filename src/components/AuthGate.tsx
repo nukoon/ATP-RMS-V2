@@ -26,7 +26,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   if (!token) return <LoginPage />
   if (checking) {
     return (
-      <div style={{ position: 'fixed', inset: 0, background: '#eef1f5', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#94a3b4', fontFamily: 'Roboto Mono', fontSize: 11 }}>
+      <div style={{ position: 'fixed', inset: 0, background: 'var(--bg)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-faint)', fontFamily: 'Roboto Mono', fontSize: 11 }}>
         Restoring session…
       </div>
     )

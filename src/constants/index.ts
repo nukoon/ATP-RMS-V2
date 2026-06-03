@@ -63,6 +63,8 @@ export const DEFAULT_MAP_CONFIG = {
   showTheta: false,
   showStorage: true,
   showHeatmap: false,
+  showGrid: true,
+  showRobots: true,
   nodeSize: 1,
   labelSize: 12,
   labelZoomThreshold: 1.0,

@@ -216,6 +216,8 @@ export interface MapViewConfig {
   showTheta: boolean
   showStorage: boolean
   showHeatmap: boolean         // overlay edge traffic-density heatmap
+  showGrid: boolean            // background grid (2D + 3D)
+  showRobots: boolean          // robot icons / models
   nodeSize: number             // px
   labelSize: number            // px
   labelZoomThreshold: number   // show labels when zoom >= this

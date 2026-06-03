@@ -19,16 +19,16 @@ export function StorageDialog({ onClose }: { onClose: () => void }) {
   return (
     <div onClick={onClose} style={ovl}>
       <div onClick={e => e.stopPropagation()} style={panel}>
-        <div style={{ display: 'flex', alignItems: 'center', padding: '10px 14px', borderBottom: '1px solid #d4dae3' }}>
-          <span style={{ fontFamily: 'Roboto Mono', fontSize: 11, letterSpacing: 2, color: '#2563eb' }}>STORAGE · AREAS · ACTIONS</span>
-          <button onClick={onClose} style={{ marginLeft: 'auto', background: 'transparent', border: 'none', color: '#64748b', cursor: 'pointer', fontSize: 18 }}>×</button>
+        <div style={{ display: 'flex', alignItems: 'center', padding: '10px 14px', borderBottom: '1px solid var(--border)' }}>
+          <span style={{ fontFamily: 'Roboto Mono', fontSize: 11, letterSpacing: 2, color: 'var(--accent)' }}>STORAGE · AREAS · ACTIONS</span>
+          <button onClick={onClose} style={{ marginLeft: 'auto', background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: 18 }}>×</button>
         </div>
-        <div style={{ display: 'flex', borderBottom: '1px solid #d4dae3' }}>
+        <div style={{ display: 'flex', borderBottom: '1px solid var(--border)' }}>
           {([['storages', 'STORAGES'], ['areas', 'AREAS'], ['actions', 'ACTIONS']] as [Tab, string][]).map(([k, l]) => (
             <button key={k} onClick={() => setTab(k)}
               style={{ flex: 1, padding: '8px 0', fontSize: 10, fontWeight: 600, letterSpacing: 1, cursor: 'pointer', fontFamily: 'Inter, "Noto Sans JP", sans-serif',
-                background: tab === k ? 'rgba(37,99,235,0.08)' : 'transparent', color: tab === k ? '#2563eb' : '#64748b',
-                border: 'none', borderBottom: tab === k ? '2px solid #2563eb' : '2px solid transparent' }}>{l}</button>
+                background: tab === k ? 'rgba(37,99,235,0.08)' : 'transparent', color: tab === k ? 'var(--accent)' : 'var(--text-muted)',
+                border: 'none', borderBottom: tab === k ? '2px solid var(--accent)' : '2px solid transparent' }}>{l}</button>
           ))}
         </div>
         <div style={{ overflowY: 'auto', padding: 14 }}>
@@ -74,7 +74,7 @@ function StoragesTab() {
     setSaved(true)
   }
 
-  if (!storages.length) return <div style={{ fontSize: 11, color: '#64748b' }}>No storages yet — add some in the STORAGE tab first.</div>
+  if (!storages.length) return <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>No storages yet — add some in the STORAGE tab first.</div>
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -88,9 +88,11 @@ function StoragesTab() {
       {storage && (
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
           <div><Lbl>Node</Lbl>
-            <select value={storage.nodeId} onChange={e => updateStorage(storage.id, { nodeId: e.target.value })} style={inp}>
-              {nodes.map(n => <option key={n.id} value={n.id}>{n.id}</option>)}
-            </select>
+            {/* type to filter (e.g. "AP70") — the node list is long */}
+            <input value={storage.nodeId} list="sd-node-list"
+              onChange={e => { const v = e.target.value.toUpperCase(); if (!v || nodes.some(n => n.id === v)) updateStorage(storage.id, { nodeId: v }) }}
+              style={inp} />
+            <datalist id="sd-node-list">{nodes.map(n => <option key={n.id} value={n.id} />)}</datalist>
           </div>
           <div><Lbl>Kind</Lbl>
             <select value={storage.kind} onChange={e => updateStorage(storage.id, { kind: e.target.value as never })} style={inp}>
@@ -136,19 +138,19 @@ function StageEditor({ title, stage, list, setList, templates }:
     setList(list.map((b, k) => k === i ? { ...b, ...patch } : b))
 
   return (
-    <div style={{ border: '1px solid #d4dae3', borderRadius: 3, padding: 8 }}>
+    <div style={{ border: '1px solid var(--border)', borderRadius: 3, padding: 8 }}>
       <div style={{ display: 'flex', alignItems: 'center', marginBottom: 6 }}>
-        <span style={{ fontSize: 9, letterSpacing: 1, color: stage === 'PICK' ? '#2563eb' : '#f59e0b', textTransform: 'uppercase' }}>{title}</span>
+        <span style={{ fontSize: 9, letterSpacing: 1, color: stage === 'PICK' ? 'var(--accent)' : '#f59e0b', textTransform: 'uppercase' }}>{title}</span>
         <button onClick={add} disabled={!templates.length} style={{ marginLeft: 'auto', ...miniBtn }}>+ add</button>
       </div>
-      {list.length === 0 && <div style={{ fontSize: 9, color: '#94a3b4' }}>none</div>}
+      {list.length === 0 && <div style={{ fontSize: 9, color: 'var(--text-faint)' }}>none</div>}
       {list.map((b, i) => {
         const tpl = templates.find(t => t.id === b.actionId)
         const params = b.params ?? tpl?.defaultParams ?? []
         return (
           <div key={i} style={{ borderTop: i ? '1px solid rgba(212,218,227,0.6)' : 'none', padding: '5px 0' }}>
             <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-              <span style={{ fontFamily: 'Roboto Mono', fontSize: 9, color: '#64748b', width: 14 }}>{i + 1}</span>
+              <span style={{ fontFamily: 'Roboto Mono', fontSize: 9, color: 'var(--text-muted)', width: 14 }}>{i + 1}</span>
               <select value={b.actionId} onChange={e => upd(i, { actionId: e.target.value, params: undefined })} style={{ ...inp, flex: 1 }}>
                 {templates.map(t => <option key={t.id} value={t.id}>{t.code} ({t.actionType})</option>)}
               </select>
@@ -206,23 +208,23 @@ function AreasTab() {
       </div>
       {err && <div style={{ fontSize: 10, color: '#dc2626' }}>{err}</div>}
 
-      <div style={{ borderTop: '1px solid #d4dae3', paddingTop: 8 }}>
+      <div style={{ borderTop: '1px solid var(--border)', paddingTop: 8 }}>
         <Lbl>Areas ({areas.length})</Lbl>
-        {areas.length === 0 && <div style={{ fontSize: 10, color: '#94a3b4' }}>No areas yet — add one above, then assign storages to it in the STORAGES tab.</div>}
+        {areas.length === 0 && <div style={{ fontSize: 10, color: 'var(--text-faint)' }}>No areas yet — add one above, then assign storages to it in the STORAGES tab.</div>}
         {areas.map(a => (
           <div key={a.id} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 0', borderBottom: '1px solid rgba(212,218,227,0.6)', fontSize: 11 }}>
-            <span style={{ fontFamily: 'Roboto Mono', color: '#2563eb', flex: 1 }}>{a.name}</span>
-            <span style={{ fontSize: 9, color: '#64748b' }}>{memberCount(a.id)}</span>
+            <span style={{ fontFamily: 'Roboto Mono', color: 'var(--accent)', flex: 1 }}>{a.name}</span>
+            <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>{memberCount(a.id)}</span>
             {/* batch fill/empty all members in this area */}
             <button onClick={() => setAreaState(a.id, 'FULL').catch(() => {})} disabled={!memberCount(a.id)} title="Set all members FULL"
               style={{ ...miniBtn, color: '#16a34a', borderColor: 'rgba(22,163,74,0.4)' }}>ALL FULL</button>
             <button onClick={() => setAreaState(a.id, 'EMPTY').catch(() => {})} disabled={!memberCount(a.id)} title="Set all members EMPTY"
-              style={{ ...miniBtn, color: '#64748b' }}>ALL EMPTY</button>
+              style={{ ...miniBtn, color: 'var(--text-muted)' }}>ALL EMPTY</button>
             <select value={a.kind} onChange={e => updateArea(a.id, { kind: e.target.value as StorageKind }).catch(() => {})} style={{ ...inp, width: 72 }}>
               <option>PICK</option><option>DROP</option><option>BOTH</option>
             </select>
             <button onClick={() => updateArea(a.id, { enabled: !a.enabled }).catch(() => {})}
-              style={{ ...miniBtn, color: a.enabled ? '#16a34a' : '#94a3b4' }}>{a.enabled ? 'ON' : 'OFF'}</button>
+              style={{ ...miniBtn, color: a.enabled ? '#16a34a' : 'var(--text-faint)' }}>{a.enabled ? 'ON' : 'OFF'}</button>
             <button onClick={() => removeArea(a.id).catch(() => {})} style={{ ...miniBtn, color: '#dc2626' }}>×</button>
           </div>
         ))}
@@ -260,19 +262,19 @@ function ActionsTab() {
       </div>
       {err && <div style={{ fontSize: 10, color: '#dc2626' }}>{err}</div>}
 
-      <div style={{ borderTop: '1px solid #d4dae3', paddingTop: 8 }}>
+      <div style={{ borderTop: '1px solid var(--border)', paddingTop: 8 }}>
         <Lbl>Templates ({templates.length})</Lbl>
         {templates.map(t => (
           <div key={t.id} style={{ padding: '6px 0', borderBottom: '1px solid rgba(212,218,227,0.6)' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11 }}>
-              <span style={{ fontFamily: 'Roboto Mono', color: '#2563eb', width: 90 }}>{t.code}</span>
-              <span style={{ color: '#4a5568', flex: 1 }}>{t.actionType}</span>
+              <span style={{ fontFamily: 'Roboto Mono', color: 'var(--accent)', width: 90 }}>{t.code}</span>
+              <span style={{ color: 'var(--text-2)', flex: 1 }}>{t.actionType}</span>
               <select value={t.blockingType} onChange={e => updateTemplate(t.id, { blockingType: e.target.value as never }).catch(() => {})}
                 style={{ ...inp, width: 80 }}><option>NONE</option><option>SOFT</option><option>HARD</option></select>
               <button onClick={() => removeTemplate(t.id).catch(() => {})} style={{ ...miniBtn, color: '#dc2626' }}>×</button>
             </div>
             {!!t.defaultParams.length && (
-              <div style={{ fontSize: 8, color: '#64748b', fontFamily: 'Roboto Mono', paddingLeft: 90, marginTop: 2 }}>
+              <div style={{ fontSize: 8, color: 'var(--text-muted)', fontFamily: 'Roboto Mono', paddingLeft: 90, marginTop: 2 }}>
                 {t.defaultParams.map(p => `${p.key}=${p.value}`).join(' · ')}
               </div>
             )}
@@ -285,10 +287,10 @@ function ActionsTab() {
 
 // ── shared styles ──────────────────────────────────────────
 const Lbl = ({ children }: { children: React.ReactNode }) => (
-  <div style={{ fontSize: 9, letterSpacing: 1, color: '#64748b', textTransform: 'uppercase', marginBottom: 3 }}>{children}</div>
+  <div style={{ fontSize: 9, letterSpacing: 1, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 3 }}>{children}</div>
 )
 const ovl: React.CSSProperties = { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }
-const panel: React.CSSProperties = { width: 600, maxHeight: '84vh', background: '#ffffff', border: '1px solid #d4dae3', borderRadius: 4, display: 'flex', flexDirection: 'column', overflow: 'hidden', fontFamily: 'Inter, "Noto Sans JP", sans-serif', color: '#1a2230' }
-const inp: React.CSSProperties = { background: '#f3f6fa', color: '#1a2230', border: '1px solid #d4dae3', borderRadius: 2, padding: '5px 7px', fontSize: 10, fontFamily: 'Roboto Mono', width: '100%', boxSizing: 'border-box' }
+const panel: React.CSSProperties = { width: 600, maxHeight: '84vh', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 4, display: 'flex', flexDirection: 'column', overflow: 'hidden', fontFamily: 'Inter, "Noto Sans JP", sans-serif', color: 'var(--text)' }
+const inp: React.CSSProperties = { background: 'var(--surface-2)', color: 'var(--text)', border: '1px solid var(--border)', borderRadius: 2, padding: '5px 7px', fontSize: 10, fontFamily: 'Roboto Mono', width: '100%', boxSizing: 'border-box' }
 const primaryBtn: React.CSSProperties = { padding: '6px 14px', fontSize: 11, fontWeight: 600, letterSpacing: 1, borderRadius: 2, cursor: 'pointer', color: '#16a34a', border: '1px solid rgba(22,163,74,0.4)', background: 'rgba(22,163,74,0.08)' }
-const miniBtn: React.CSSProperties = { fontSize: 9, padding: '2px 6px', borderRadius: 2, cursor: 'pointer', color: '#64748b', border: '1px solid #d4dae3', background: 'transparent', fontFamily: 'Roboto Mono' }
+const miniBtn: React.CSSProperties = { fontSize: 9, padding: '2px 6px', borderRadius: 2, cursor: 'pointer', color: 'var(--text-muted)', border: '1px solid var(--border)', background: 'transparent', fontFamily: 'Roboto Mono' }

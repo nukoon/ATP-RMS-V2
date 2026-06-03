@@ -11,12 +11,12 @@ interface Props {
 
 const SliderRow = ({ label, value, min, max, step, onChange, suffix = '' }:
   { label: string; value: number; min: number; max: number; step: number; onChange: (v: number) => void; suffix?: string }) => (
-  <div style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '5px 10px', borderRight: '1px solid #d4dae3', whiteSpace: 'nowrap' }}>
-    <span style={{ fontSize: 9, color: '#64748b', letterSpacing: '1.5px', textTransform: 'uppercase' }}>{label}</span>
+  <div style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '5px 10px', borderRight: '1px solid var(--border)', whiteSpace: 'nowrap' }}>
+    <span style={{ fontSize: 9, color: 'var(--text-muted)', letterSpacing: '1.5px', textTransform: 'uppercase' }}>{label}</span>
     <input type="range" min={min} max={max} step={step} value={value}
       onChange={e => onChange(Number(e.target.value))}
-      style={{ width: 68, height: 3, accentColor: '#2563eb', cursor: 'pointer' }} />
-    <span style={{ fontFamily: 'Roboto Mono', fontSize: 10, color: '#2563eb', minWidth: 26, textAlign: 'right' }}>
+      style={{ width: 68, height: 3, accentColor: 'var(--accent)', cursor: 'pointer' }} />
+    <span style={{ fontFamily: 'Roboto Mono', fontSize: 10, color: 'var(--accent)', minWidth: 26, textAlign: 'right' }}>
       {value}{suffix}
     </span>
   </div>
@@ -76,31 +76,33 @@ function ToolButton({ icon, label, onClick, title, accent = false, active = fals
         display: 'inline-flex', alignItems: 'center', gap: 6, height: 26, padding: '0 10px',
         fontFamily: 'Roboto Mono, "Noto Sans JP", monospace', fontSize: 9, fontWeight: 600,
         letterSpacing: 1, textTransform: 'uppercase', cursor: 'pointer', borderRadius: 6,
-        color: accent ? '#2563eb' : '#4a5568',
-        border: `1px solid ${on ? (accent ? 'rgba(37,99,235,0.45)' : '#c2cad6') : '#d4dae3'}`,
+        color: accent ? 'var(--accent)' : 'var(--text-2)',
+        border: `1px solid ${on ? (accent ? 'rgba(37,99,235,0.45)' : '#c2cad6') : 'var(--border)'}`,
         background: press ? (accent ? 'rgba(37,99,235,0.18)' : '#e3e8ef')
-          : on ? (accent ? 'rgba(37,99,235,0.12)' : '#eef1f5')
-          : (accent ? 'rgba(37,99,235,0.05)' : '#ffffff'),
+          : on ? (accent ? 'rgba(37,99,235,0.12)' : 'var(--bg)')
+          : (accent ? 'rgba(37,99,235,0.05)' : 'var(--surface)'),
         transition: 'background 140ms ease, border-color 140ms ease, color 140ms ease',
         outline: 'none', whiteSpace: 'nowrap',
       }}>
-      <span style={{ display: 'flex', color: accent ? '#2563eb' : (on ? '#4a5568' : '#64748b') }}>{icon}</span>
+      <span style={{ display: 'flex', color: accent ? 'var(--accent)' : (on ? 'var(--text-2)' : 'var(--text-muted)') }}>{icon}</span>
       {label}
     </button>
   )
 }
 
 // boolean (show/hide) layer toggles, collected under one "Display" dropdown
-type BoolKey = 'showLM' | 'showAP' | 'showCH' | 'showEdges' | 'showPaths' | 'showTheta' | 'showStorage' | 'showHeatmap'
+type BoolKey = 'showLM' | 'showAP' | 'showCH' | 'showEdges' | 'showPaths' | 'showTheta' | 'showStorage' | 'showHeatmap' | 'showGrid' | 'showRobots'
 const DISPLAY_LAYERS: { key: BoolKey; label: string }[] = [
   { key: 'showLM',      label: 'Location Marks (LM)' },
   { key: 'showAP',      label: 'Action Points (AP)' },
   { key: 'showCH',      label: 'Charge Nodes' },
   { key: 'showEdges',   label: 'Edges / Lanes' },
+  { key: 'showRobots',  label: 'Robots' },
   { key: 'showPaths',   label: 'Robot Paths' },
   { key: 'showTheta',   label: 'θ Direction' },
   { key: 'showStorage', label: 'Storage / Docks' },
   { key: 'showHeatmap', label: 'Traffic Heatmap' },
+  { key: 'showGrid',    label: 'Grid' },
 ]
 
 function DisplayMenu({ cfg, onChange }: { cfg: MapViewConfig; onChange: (patch: Partial<MapViewConfig>) => void }) {
@@ -119,20 +121,20 @@ function DisplayMenu({ cfg, onChange }: { cfg: MapViewConfig; onChange: (patch: 
   }
 
   return (
-    <div style={{ display: 'flex', alignItems: 'center', padding: '5px 10px', borderRight: '1px solid #d4dae3' }}>
+    <div style={{ display: 'flex', alignItems: 'center', padding: '5px 10px', borderRight: '1px solid var(--border)' }}>
       <button ref={btnRef} type="button" onClick={toggle} title="Show / hide map layers"
         onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
         onFocus={() => setHover(true)} onBlur={() => setHover(false)}
         style={{ display: 'inline-flex', alignItems: 'center', gap: 6, height: 26, padding: '0 10px', fontSize: 9,
           fontFamily: 'Roboto Mono, "Noto Sans JP", monospace', fontWeight: 600, letterSpacing: 1, textTransform: 'uppercase',
-          borderRadius: 6, cursor: 'pointer', outline: 'none', whiteSpace: 'nowrap', color: '#2563eb',
-          border: `1px solid ${lit ? 'rgba(37,99,235,0.45)' : '#d4dae3'}`,
+          borderRadius: 6, cursor: 'pointer', outline: 'none', whiteSpace: 'nowrap', color: 'var(--accent)',
+          border: `1px solid ${lit ? 'rgba(37,99,235,0.45)' : 'var(--border)'}`,
           background: lit ? 'rgba(37,99,235,0.12)' : 'rgba(37,99,235,0.05)',
           transition: 'background 140ms ease, border-color 140ms ease' }}>
         <span style={{ display: 'flex' }}><EyeIcon open /></span>
         DISPLAY
-        <span style={{ color: '#94a3b4', fontWeight: 700 }}>{shown}/{DISPLAY_LAYERS.length}</span>
-        <span style={{ fontSize: 8, color: '#94a3b4', transition: 'transform 140ms ease', transform: open ? 'rotate(180deg)' : 'none' }}>▾</span>
+        <span style={{ color: 'var(--text-faint)', fontWeight: 700 }}>{shown}/{DISPLAY_LAYERS.length}</span>
+        <span style={{ fontSize: 8, color: 'var(--text-faint)', transition: 'transform 140ms ease', transform: open ? 'rotate(180deg)' : 'none' }}>▾</span>
       </button>
 
       {open && pos && (
@@ -140,23 +142,23 @@ function DisplayMenu({ cfg, onChange }: { cfg: MapViewConfig; onChange: (patch: 
           style={{ position: 'fixed', inset: 0, zIndex: 1200 }}>
           <div onClick={e => e.stopPropagation()}
             style={{ position: 'absolute', left: Math.min(pos.x, window.innerWidth - 234), top: pos.y,
-              minWidth: 222, background: '#ffffff', border: '1px solid #d4dae3', borderRadius: 8,
+              minWidth: 222, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8,
               boxShadow: '0 10px 28px rgba(26,34,48,0.18)', overflow: 'hidden', padding: '5px 0',
               fontFamily: 'Inter, "Noto Sans JP", sans-serif' }}>
-            <div style={{ padding: '5px 13px 7px', fontSize: 8, letterSpacing: 1.5, color: '#94a3b4', textTransform: 'uppercase', borderBottom: '1px solid #eef1f5' }}>
+            <div style={{ padding: '5px 13px 7px', fontSize: 8, letterSpacing: 1.5, color: 'var(--text-faint)', textTransform: 'uppercase', borderBottom: '1px solid var(--bg)' }}>
               Map Layers
             </div>
             {DISPLAY_LAYERS.map(l => {
               const on = cfg[l.key]
-              const hi = (e: React.SyntheticEvent) => ((e.currentTarget as HTMLElement).style.background = '#f3f6fa')
+              const hi = (e: React.SyntheticEvent) => ((e.currentTarget as HTMLElement).style.background = 'var(--surface-2)')
               const lo = (e: React.SyntheticEvent) => ((e.currentTarget as HTMLElement).style.background = 'transparent')
               return (
                 <button key={l.key} type="button" onClick={() => onChange({ [l.key]: !on })}
                   style={{ display: 'flex', alignItems: 'center', gap: 9, width: '100%', textAlign: 'left',
                     padding: '7px 13px', fontSize: 11, cursor: 'pointer', border: 'none', background: 'transparent',
-                    outline: 'none', color: on ? '#1a2230' : '#94a3b4', transition: 'background 120ms ease' }}
+                    outline: 'none', color: on ? 'var(--text)' : 'var(--text-faint)', transition: 'background 120ms ease' }}
                   onMouseEnter={hi} onMouseLeave={lo} onFocus={hi} onBlur={lo}>
-                  <span style={{ display: 'flex', color: on ? '#2563eb' : '#b6c0cd' }}><EyeIcon open={on} /></span>
+                  <span style={{ display: 'flex', color: on ? 'var(--accent)' : '#b6c0cd' }}><EyeIcon open={on} /></span>
                   <span style={{ flex: 1 }}>{l.label}</span>
                 </button>
               )
@@ -170,7 +172,7 @@ function DisplayMenu({ cfg, onChange }: { cfg: MapViewConfig; onChange: (patch: 
 
 export function MapToolbar({ config: cfg, onChange, onManageFacilities, onOpenDashboard, onOpenHistory }: Props) {
   return (
-    <div style={{ display: 'flex', alignItems: 'center', background: '#f3f6fa', borderBottom: '1px solid #d4dae3', flexShrink: 0, overflowX: 'auto' }}>
+    <div style={{ display: 'flex', alignItems: 'center', background: 'var(--surface-2)', borderBottom: '1px solid var(--border)', flexShrink: 0, overflowX: 'auto' }}>
       <SliderRow label="Robot m"    value={cfg.robotSize}          min={1}  max={6}  step={0.5} onChange={v => onChange({ robotSize: v })} suffix="m" />
       <SliderRow label="Node px"    value={cfg.nodeSize}           min={1}  max={10} step={0.5} onChange={v => onChange({ nodeSize: v })} />
       <SliderRow label="Label px"   value={cfg.labelSize}          min={6}  max={18} step={1}   onChange={v => onChange({ labelSize: v })} />
@@ -179,7 +181,7 @@ export function MapToolbar({ config: cfg, onChange, onManageFacilities, onOpenDa
       <DisplayMenu cfg={cfg} onChange={onChange} />
       {/* Facilities (docks + traffic) */}
       {onManageFacilities && (
-        <div style={{ display: 'flex', alignItems: 'center', padding: '5px 10px', borderRight: '1px solid #d4dae3' }}>
+        <div style={{ display: 'flex', alignItems: 'center', padding: '5px 10px', borderRight: '1px solid var(--border)' }}>
           <ToolButton accent icon={<DocksIcon />} label="Docks / Traffic" onClick={onManageFacilities} title="Manage parking/charging docks & traffic areas" />
         </div>
       )}

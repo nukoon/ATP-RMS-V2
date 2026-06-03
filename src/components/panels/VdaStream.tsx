@@ -7,9 +7,9 @@ export function VdaStream({ entries }: { entries: MqttLogEntry[] }) {
         <div key={e.id} style={{
           display: 'flex', justifyContent: 'space-between', gap: 4,
           padding: '3px 0', borderBottom: '1px solid rgba(212,218,227,0.6)',
-          fontFamily: 'Roboto Mono', fontSize: 9, color: '#94a3b4',
+          fontFamily: 'Roboto Mono', fontSize: 9, color: 'var(--text-faint)',
         }}>
-          <span style={{ color: '#2563eb', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
+          <span style={{ color: 'var(--accent)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
             {e.robotId}/{e.topic}
           </span>
           <span style={{ color: 'rgba(90,112,128,0.7)', flexShrink: 0 }}>{e.timestamp}</span>

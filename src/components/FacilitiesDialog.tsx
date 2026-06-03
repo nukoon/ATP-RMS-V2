@@ -16,16 +16,16 @@ export function FacilitiesDialog({ onClose, onDrawTrafficArea }: { onClose: () =
   return (
     <div onClick={onClose} style={ovl}>
       <div onClick={e => e.stopPropagation()} style={panel}>
-        <div style={{ display: 'flex', alignItems: 'center', padding: '10px 14px', borderBottom: '1px solid #d4dae3' }}>
-          <span style={{ fontFamily: 'Roboto Mono', fontSize: 11, letterSpacing: 2, color: '#2563eb' }}>DOCKS &amp; TRAFFIC</span>
-          <button onClick={onClose} style={{ marginLeft: 'auto', background: 'transparent', border: 'none', color: '#64748b', cursor: 'pointer', fontSize: 18 }}>×</button>
+        <div style={{ display: 'flex', alignItems: 'center', padding: '10px 14px', borderBottom: '1px solid var(--border)' }}>
+          <span style={{ fontFamily: 'Roboto Mono', fontSize: 11, letterSpacing: 2, color: 'var(--accent)' }}>DOCKS &amp; TRAFFIC</span>
+          <button onClick={onClose} style={{ marginLeft: 'auto', background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: 18 }}>×</button>
         </div>
-        <div style={{ display: 'flex', borderBottom: '1px solid #d4dae3' }}>
+        <div style={{ display: 'flex', borderBottom: '1px solid var(--border)' }}>
           {([['docks', 'DOCKS (PARK / CHARGE)'], ['traffic', 'TRAFFIC AREAS']] as [Tab, string][]).map(([k, l]) => (
             <button key={k} onClick={() => setTab(k)}
               style={{ flex: 1, padding: '8px 0', fontSize: 10, fontWeight: 600, letterSpacing: 1, cursor: 'pointer', fontFamily: 'Inter, "Noto Sans JP", sans-serif',
-                background: tab === k ? 'rgba(37,99,235,0.08)' : 'transparent', color: tab === k ? '#2563eb' : '#64748b',
-                border: 'none', borderBottom: tab === k ? '2px solid #2563eb' : '2px solid transparent' }}>{l}</button>
+                background: tab === k ? 'rgba(37,99,235,0.08)' : 'transparent', color: tab === k ? 'var(--accent)' : 'var(--text-muted)',
+                border: 'none', borderBottom: tab === k ? '2px solid var(--accent)' : '2px solid transparent' }}>{l}</button>
           ))}
         </div>
         <div style={{ overflowY: 'auto', padding: 14 }}>
@@ -74,15 +74,15 @@ function DocksTab() {
         <button onClick={create} style={primaryBtn}>+ ADD</button>
       </div>
       {err && <div style={{ fontSize: 10, color: '#dc2626' }}>{err}</div>}
-      <div style={{ fontSize: 9, color: '#94a3b4' }}>CHARGE docks recharge robots; PARK docks just hold them. Bind a robot to reserve its home dock. Changes apply on the next START SIM.</div>
+      <div style={{ fontSize: 9, color: 'var(--text-faint)' }}>CHARGE docks recharge robots; PARK docks just hold them. Bind a robot to reserve its home dock. Changes apply on the next START SIM.</div>
 
-      <div style={{ borderTop: '1px solid #d4dae3', paddingTop: 8 }}>
+      <div style={{ borderTop: '1px solid var(--border)', paddingTop: 8 }}>
         <Lbl>Docks ({docks.length})</Lbl>
-        {docks.length === 0 && <div style={{ fontSize: 10, color: '#94a3b4' }}>No docks yet — robots fall back to the map's Charge nodes.</div>}
+        {docks.length === 0 && <div style={{ fontSize: 10, color: 'var(--text-faint)' }}>No docks yet — robots fall back to the map's Charge nodes.</div>}
         {docks.map(d => (
           <div key={d.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', borderBottom: '1px solid rgba(212,218,227,0.6)', fontSize: 11 }}>
-            <span style={{ fontFamily: 'Roboto Mono', color: d.type === 'CHARGE' ? '#ea7a00' : '#2563eb', width: 90 }}>{d.name}</span>
-            <span style={{ fontSize: 9, color: '#64748b', flex: 1 }}>@{d.nodeId}</span>
+            <span style={{ fontFamily: 'Roboto Mono', color: d.type === 'CHARGE' ? '#ea7a00' : 'var(--accent)', width: 90 }}>{d.name}</span>
+            <span style={{ fontSize: 9, color: 'var(--text-muted)', flex: 1 }}>@{d.nodeId}</span>
             <select value={d.type} onChange={e => updateDock(d.id, { type: e.target.value as DockType }).catch(() => {})} style={{ ...inp, width: 80 }}>
               <option>PARK</option><option>CHARGE</option>
             </select>
@@ -104,7 +104,7 @@ function TrafficTab({ onDraw }: { onDraw?: () => void }) {
   const { trafficAreas, updateTrafficArea, removeTrafficArea } = useStorageStore()
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-      <div style={{ fontSize: 11, color: '#4a5568' }}>
+      <div style={{ fontSize: 11, color: 'var(--text-2)' }}>
         Traffic Areas are zones where at most <b>N</b> AMRs may be present at once. Robots wait <i>outside</i> a full zone (no reversing) — use them on single-lane corridors or intersections the auto-router can't sequence.
       </div>
       <button onClick={onDraw} disabled={!onDraw}
@@ -112,35 +112,35 @@ function TrafficTab({ onDraw }: { onDraw?: () => void }) {
         ▭ DRAW ON MAP
       </button>
 
-      <div style={{ borderTop: '1px solid #d4dae3', paddingTop: 8 }}>
+      <div style={{ borderTop: '1px solid var(--border)', paddingTop: 8 }}>
         <Lbl>Zones ({trafficAreas.length})</Lbl>
-        {trafficAreas.length === 0 && <div style={{ fontSize: 10, color: '#94a3b4' }}>No traffic areas — click DRAW ON MAP and lasso a corridor.</div>}
+        {trafficAreas.length === 0 && <div style={{ fontSize: 10, color: 'var(--text-faint)' }}>No traffic areas — click DRAW ON MAP and lasso a corridor.</div>}
         {trafficAreas.map(z => (
           <div key={z.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', borderBottom: '1px solid rgba(212,218,227,0.6)', fontSize: 11 }}>
             <span style={{ fontFamily: 'Roboto Mono', color: '#dc2626', flex: 1 }}>⛒ {z.name}</span>
-            <span style={{ fontSize: 9, color: '#64748b' }}>{z.nodeIds.length} node(s)</span>
-            <label style={{ fontSize: 9, color: '#64748b', display: 'flex', alignItems: 'center', gap: 3 }}>cap
+            <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>{z.nodeIds.length} node(s)</span>
+            <label style={{ fontSize: 9, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 3 }}>cap
               <input type="number" min={1} max={9} value={z.capacity}
                 onChange={e => updateTrafficArea(z.id, { capacity: Math.max(1, +e.target.value || 1) }).catch(() => {})}
                 style={{ ...inp, width: 42, padding: '3px 4px' }} />
             </label>
             <button onClick={() => updateTrafficArea(z.id, { enabled: !z.enabled }).catch(() => {})}
-              style={{ ...miniBtn, color: z.enabled ? '#16a34a' : '#94a3b4' }}>{z.enabled ? 'ON' : 'OFF'}</button>
+              style={{ ...miniBtn, color: z.enabled ? '#16a34a' : 'var(--text-faint)' }}>{z.enabled ? 'ON' : 'OFF'}</button>
             <button onClick={() => removeTrafficArea(z.id).catch(() => {})} style={{ ...miniBtn, color: '#dc2626' }}>×</button>
           </div>
         ))}
       </div>
-      <div style={{ fontSize: 9, color: '#94a3b4' }}>Changes take effect on the next START SIM.</div>
+      <div style={{ fontSize: 9, color: 'var(--text-faint)' }}>Changes take effect on the next START SIM.</div>
     </div>
   )
 }
 
 // ── shared styles ──────────────────────────────────────────
 const Lbl = ({ children }: { children: React.ReactNode }) => (
-  <div style={{ fontSize: 9, letterSpacing: 1, color: '#64748b', textTransform: 'uppercase', marginBottom: 3 }}>{children}</div>
+  <div style={{ fontSize: 9, letterSpacing: 1, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 3 }}>{children}</div>
 )
 const ovl: React.CSSProperties = { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }
-const panel: React.CSSProperties = { width: 560, maxHeight: '84vh', background: '#ffffff', border: '1px solid #d4dae3', borderRadius: 4, display: 'flex', flexDirection: 'column', overflow: 'hidden', fontFamily: 'Inter, "Noto Sans JP", sans-serif', color: '#1a2230' }
-const inp: React.CSSProperties = { background: '#f3f6fa', color: '#1a2230', border: '1px solid #d4dae3', borderRadius: 2, padding: '5px 7px', fontSize: 10, fontFamily: 'Roboto Mono', width: '100%', boxSizing: 'border-box' }
+const panel: React.CSSProperties = { width: 560, maxHeight: '84vh', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 4, display: 'flex', flexDirection: 'column', overflow: 'hidden', fontFamily: 'Inter, "Noto Sans JP", sans-serif', color: 'var(--text)' }
+const inp: React.CSSProperties = { background: 'var(--surface-2)', color: 'var(--text)', border: '1px solid var(--border)', borderRadius: 2, padding: '5px 7px', fontSize: 10, fontFamily: 'Roboto Mono', width: '100%', boxSizing: 'border-box' }
 const primaryBtn: React.CSSProperties = { padding: '6px 14px', fontSize: 11, fontWeight: 600, letterSpacing: 1, borderRadius: 2, cursor: 'pointer', color: '#16a34a', border: '1px solid rgba(22,163,74,0.4)', background: 'rgba(22,163,74,0.08)' }
-const miniBtn: React.CSSProperties = { fontSize: 9, padding: '2px 6px', borderRadius: 2, cursor: 'pointer', color: '#64748b', border: '1px solid #d4dae3', background: 'transparent', fontFamily: 'Roboto Mono' }
+const miniBtn: React.CSSProperties = { fontSize: 9, padding: '2px 6px', borderRadius: 2, cursor: 'pointer', color: 'var(--text-muted)', border: '1px solid var(--border)', background: 'transparent', fontFamily: 'Roboto Mono' }
