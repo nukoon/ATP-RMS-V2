@@ -37,9 +37,6 @@ const MODEL_FILE: Partial<Record<AgvModel, string>> = {
 }
 const DEFAULT_MODEL = 'mp10'
 const AGV3D_URL = (file: string) => `/assets/agv3d/${file}.glb`
-const FLOOR_URL = '/assets/agv3d/floor.jpg'    // warehouse floor texture
-const CHARGE_FILE = 'chargeStation'            // glb placed at every Charge node
-
 // Extra factory scenery: add any glb under public/assets/agv3d/ at a world map
 // coordinate (metres, +X east / +Y north) and it shows up in the 3D view.
 // e.g. { file: 'elevator', x: 12, y: 40, rotDeg: 90, size: 3 }
@@ -156,20 +153,7 @@ export function Map3DCanvas({ map, robots, config, selectedRobotId, onRobotClick
     sun.position.set(cx + span, span, -cy + span)
     scene.add(sun)
 
-    // ── floor + grid ──
-    const floorMat = new THREE.MeshStandardMaterial({ color: tc.bg3d, roughness: 1 })
-    new THREE.TextureLoader().load(FLOOR_URL, (tex) => {
-      tex.wrapS = tex.wrapT = THREE.RepeatWrapping
-      tex.repeat.set(Math.max(1, Math.round(span * 1.4 / 4)), Math.max(1, Math.round(span * 1.4 / 4)))
-      tex.colorSpace = THREE.SRGBColorSpace
-      tex.anisotropy = 4
-      floorMat.map = tex; floorMat.color.setHex(tc.floorTint); floorMat.needsUpdate = true
-    })
-    const floor = new THREE.Mesh(new THREE.PlaneGeometry(span * 1.4, span * 1.4), floorMat)
-    floor.rotation.x = -Math.PI / 2
-    floor.position.set(cx, -0.02, -cy)
-    scene.add(floor)
-
+    // ── grid only (no solid floor — keeps the scene light/uncluttered) ──
     const grid = new THREE.GridHelper(Math.ceil(span * 1.4), Math.ceil(span * 1.4 / 5), tc.grid3dMajor, tc.grid3dMinor)
     grid.position.set(cx, 0, -cy)
     scene.add(grid)
@@ -233,7 +217,6 @@ export function Map3DCanvas({ map, robots, config, selectedRobotId, onRobotClick
         sceneryLayer.add(inst)
       }).catch(() => { /* skip a prop that fails to load */ })
     }
-    for (const p of map.points) if (p.cls === 'Charge') placeProp(CHARGE_FILE, p.x, p.y, 0, 1.0)
     for (const s of SCENERY) placeProp(s.file, s.x, s.y, s.rotDeg ?? 0, s.size ?? 1.5)
 
     // ── stock: a goods glb shown when a storage is FULL; a faint flat marker
@@ -304,7 +287,7 @@ export function Map3DCanvas({ map, robots, config, selectedRobotId, onRobotClick
           new THREE.Vector3(maxX, 0.02, -maxY), new THREE.Vector3(minX, 0.02, -maxY), new THREE.Vector3(minX, 0.02, -minY),
         ])
         g.add(new THREE.Line(border, new THREE.LineBasicMaterial({ color: col, transparent: true, opacity: 0.65 })))
-        const lbl = makeLabel(`${a.name} · ${a.kind}`, '#ffffff', hex6(col), 1.1)
+        const lbl = makeLabel(a.name, '#ffffff', hex6(col), 1.1)
         lbl.position.set(cx2, 1.5, -cy2)
         g.add(lbl)
         areaGroups.set(a.id, g); areaLayer.add(g)

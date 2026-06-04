@@ -41,8 +41,9 @@ export function useMapTransform(map: FleetMap | null) {
 
   const handleMouseUp = useCallback(() => { isDragging.current = false }, [])
 
-  const zoomIn  = useCallback(() => setTransform(t => zoomAt(t, 1.3, 0, 0)), [])
-  const zoomOut = useCallback(() => setTransform(t => zoomAt(t, 0.77, 0, 0)), [])
+  // zoom about the canvas centre so the view stays put (not the top-left corner)
+  const zoomIn  = useCallback(() => setTransform(t => zoomAt(t, 1.3,  sizeRef.current.w / 2, sizeRef.current.h / 2)), [])
+  const zoomOut = useCallback(() => setTransform(t => zoomAt(t, 0.77, sizeRef.current.w / 2, sizeRef.current.h / 2)), [])
 
   return { transform, fitToCanvas, handleWheel, handleMouseDown, handleMouseMove, handleMouseUp, zoomIn, zoomOut }
 }

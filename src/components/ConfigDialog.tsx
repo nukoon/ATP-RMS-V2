@@ -128,23 +128,63 @@ function AmrTab() {
         {!amrsLoaded && <div style={{ fontSize: 10, color: 'var(--text-faint)', padding: '6px 0' }}>Loading…</div>}
         {amrsLoaded && amrs.length === 0 && <div style={{ fontSize: 10, color: 'var(--text-faint)', padding: '6px 0' }}>None yet — add a robot above to connect to it.</div>}
         {amrs.map(a => (
-          <div key={a.serial} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', borderBottom: '1px solid rgba(212,218,227,0.5)', fontSize: 11 }}>
-            <input type="checkbox" checked={a.enabled} onChange={e => { updateAmr(a.serial, { enabled: e.target.checked }).catch(onErr) }} style={{ accentColor: 'var(--accent)' }} />
-            <span style={{ fontFamily: 'Roboto Mono', color: 'var(--text)', width: 70 }}>{a.serial}</span>
-            <span style={{ color: 'var(--text-muted)', width: 48 }}>{a.model}</span>
-            {/* per-AMR identity colour — click a swatch to change it */}
-            <span style={{ display: 'flex', gap: 2 }}>
-              {COLORS.map(c => (
-                <button key={c} title="set colour" onClick={() => { updateAmr(a.serial, { color: c }).catch(onErr) }}
-                  style={{ width: 13, height: 13, borderRadius: '50%', background: c, cursor: 'pointer', padding: 0,
-                    border: a.color === c ? '2px solid var(--text)' : '1px solid var(--border)' }} />
-              ))}
-            </span>
-            <span style={{ fontFamily: 'Roboto Mono', color: 'var(--text-2)', flex: 1, textAlign: 'right' }}>{a.ip || '—'}</span>
-            <button onClick={() => { removeAmr(a.serial).catch(onErr) }} style={{ background: 'transparent', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: 14 }}>×</button>
-          </div>
+          <AmrRow key={a.serial} a={a} updateAmr={updateAmr} removeAmr={removeAmr} onErr={onErr} />
         ))}
       </div>
+    </div>
+  )
+}
+
+// One AMR row — view mode (toggle/colour/delete) with an inline EDIT mode for
+// name / model / IP (serial is the key, so it stays read-only).
+function AmrRow({ a, updateAmr, removeAmr, onErr }: {
+  a: AmrConfig
+  updateAmr: (serial: string, patch: Partial<AmrConfig>) => Promise<unknown>
+  removeAmr: (serial: string) => Promise<unknown>
+  onErr: (e: unknown) => void
+}) {
+  const [editing, setEditing] = useState(false)
+  const [name, setName]   = useState(a.name)
+  const [model, setModel] = useState<AgvModel>(a.model)
+  const [ip, setIp]       = useState(a.ip)
+
+  const start = () => { setName(a.name); setModel(a.model); setIp(a.ip); setEditing(true) }
+  const save = async () => {
+    try { await updateAmr(a.serial, { name: name.trim() || a.serial, model, ip: ip.trim() }); setEditing(false) }
+    catch (e) { onErr(e) }
+  }
+
+  if (editing) return (
+    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, padding: '8px 0', borderBottom: '1px solid rgba(212,218,227,0.5)' }}>
+      <div style={{ gridColumn: '1 / -1', fontFamily: 'Roboto Mono', fontSize: 10, color: 'var(--text-muted)' }}>Editing {a.serial}</div>
+      <input style={inputStyle} value={name} onChange={e => setName(e.target.value)} placeholder="Display name" />
+      <input style={inputStyle} value={ip} onChange={e => setIp(e.target.value)} placeholder="IP address" />
+      <select style={{ ...inputStyle, gridColumn: '1 / -1' }} value={model} onChange={e => setModel(e.target.value as AgvModel)}>
+        {AGV_MODELS.map(m => <option key={m} value={m}>{m} — {AGV_SPECS[m].name}</option>)}
+      </select>
+      <div style={{ gridColumn: '1 / -1', display: 'flex', gap: 6 }}>
+        <button onClick={save} style={{ ...primaryBtn, flex: 1, padding: '4px 0' }}>SAVE</button>
+        <button onClick={() => setEditing(false)}
+          style={{ flex: 1, padding: '4px 0', fontSize: 10, fontWeight: 600, letterSpacing: 1, borderRadius: 2, cursor: 'pointer', color: 'var(--text-muted)', border: '1px solid var(--border)', background: 'transparent' }}>CANCEL</button>
+      </div>
+    </div>
+  )
+
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', borderBottom: '1px solid rgba(212,218,227,0.5)', fontSize: 11 }}>
+      <input type="checkbox" checked={a.enabled} onChange={e => { updateAmr(a.serial, { enabled: e.target.checked }).catch(onErr) }} style={{ accentColor: 'var(--accent)' }} />
+      <span style={{ fontFamily: 'Roboto Mono', color: 'var(--text)', width: 70 }} title={a.name}>{a.serial}</span>
+      <span style={{ color: 'var(--text-muted)', width: 48 }}>{a.model}</span>
+      <span style={{ display: 'flex', gap: 2 }}>
+        {COLORS.map(c => (
+          <button key={c} title="set colour" onClick={() => { updateAmr(a.serial, { color: c }).catch(onErr) }}
+            style={{ width: 13, height: 13, borderRadius: '50%', background: c, cursor: 'pointer', padding: 0,
+              border: a.color === c ? '2px solid var(--text)' : '1px solid var(--border)' }} />
+        ))}
+      </span>
+      <span style={{ fontFamily: 'Roboto Mono', color: 'var(--text-2)', flex: 1, textAlign: 'right' }}>{a.ip || '—'}</span>
+      <button onClick={start} title="Edit" style={{ background: 'transparent', border: 'none', color: 'var(--accent)', cursor: 'pointer', fontSize: 12 }}>✎</button>
+      <button onClick={() => { removeAmr(a.serial).catch(onErr) }} title="Delete" style={{ background: 'transparent', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: 14 }}>×</button>
     </div>
   )
 }

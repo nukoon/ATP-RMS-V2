@@ -473,7 +473,7 @@ function drawAreas(ctx: CanvasRenderingContext2D, map: FleetMap, areas: StorageA
       const lblPx = Math.max(9, cfg.labelSize - 1)
       ctx.font = `bold ${lblPx}px Roboto Mono, "Noto Sans JP", monospace`
       ctx.textAlign = 'left'; ctx.textBaseline = 'middle'
-      const text = `${a.name} · ${a.kind}`
+      const text = a.name
       const tw = ctx.measureText(text).width
       const chipH = lblPx + 7, chipW = tw + 14
       ctx.save()
@@ -488,34 +488,19 @@ function drawAreas(ctx: CanvasRenderingContext2D, map: FleetMap, areas: StorageA
 }
 
 // TRAFFIC AREAS: operator-defined mutual-exclusion zones (red hatched box).
-function drawTrafficAreas(ctx: CanvasRenderingContext2D, map: FleetMap, zones: TrafficArea[], t: Transform, cfg: MapViewConfig) {
-  const pad = 1.2
+function drawTrafficAreas(ctx: CanvasRenderingContext2D, map: FleetMap, zones: TrafficArea[], t: Transform, _cfg: MapViewConfig) {
+  // a simple red ring marking each node in the zone — no box, no name label
+  const col = '#dc2626'
+  const r = Math.max(5, t.scale * 0.55)
   for (const z of zones) {
     if (!z.enabled) continue
-    const pts = z.nodeIds.map(id => map.points.find(p => p.id === id)).filter((p): p is MapPoint => !!p)
-    if (!pts.length) continue
-    const xs = pts.map(p => p.x), ys = pts.map(p => p.y)
-    const tl = worldToScreen(Math.min(...xs) - pad, Math.max(...ys) + pad, t)
-    const br = worldToScreen(Math.max(...xs) + pad, Math.min(...ys) - pad, t)
-    const x = tl.sx, y = tl.sy, w = br.sx - tl.sx, h = br.sy - tl.sy
-    const col = '#dc2626'
-    ctx.save()
-    ctx.beginPath(); ctx.roundRect(x, y, w, h, 5)
-    ctx.fillStyle = col + '12'; ctx.fill()
-    ctx.strokeStyle = col + '88'; ctx.lineWidth = 1.5; ctx.lineCap = 'round'; ctx.setLineDash([2, 5]); ctx.stroke(); ctx.setLineDash([])
-    ctx.restore()
-    if (t.scale >= cfg.labelZoomThreshold) {
-      const lblPx = Math.max(9, cfg.labelSize - 2)
-      ctx.font = `bold ${lblPx}px Roboto Mono, "Noto Sans JP", monospace`
-      ctx.textAlign = 'left'; ctx.textBaseline = 'middle'
-      const text = `${z.name} · ${z.capacity}`
-      const tw = ctx.measureText(text).width
-      const chipH = lblPx + 7, chipW = tw + 13, cyl = y + h - chipH / 2 - 2
-      // solid red chip so the zone name stays legible over lanes/nodes
-      ctx.beginPath(); ctx.roundRect(x + 5, cyl - chipH / 2, chipW, chipH, 4)
-      ctx.fillStyle = col + 'e6'; ctx.fill()
-      ctx.fillStyle = '#ffffff'; ctx.fillText(text, x + 11, cyl + 0.5)
-      ctx.textBaseline = 'alphabetic'
+    for (const id of z.nodeIds) {
+      const p = map.points.find(n => n.id === id)
+      if (!p) continue
+      const { sx, sy } = worldToScreen(p.x, p.y, t)
+      ctx.beginPath(); ctx.arc(sx, sy, r, 0, Math.PI * 2)
+      ctx.fillStyle = col + '1f'; ctx.fill()
+      ctx.strokeStyle = col + 'cc'; ctx.lineWidth = 1.6; ctx.setLineDash([]); ctx.stroke()
     }
   }
 }

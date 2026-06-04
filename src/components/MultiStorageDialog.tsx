@@ -34,8 +34,10 @@ export function MultiStorageDialog({ nodeIds, onClose }: { nodeIds: string[]; on
         areaId = a.id
       }
       let n = 0
+      const pad = String(fresh.length).length
       for (const nodeId of fresh) {
-        await addStorage({ name: `${prefix}${nodeId}`, nodeId, kind, state: 'EMPTY', enabled: true, areaId })
+        // sequential names (ST-01, ST-02, …) — node ids make the name too long
+        await addStorage({ name: `${prefix}${String(n + 1).padStart(pad, '0')}`, nodeId, kind, state: 'EMPTY', enabled: true, areaId })
         n++
       }
       setDone(n)
@@ -64,8 +66,8 @@ export function MultiStorageDialog({ nodeIds, onClose }: { nodeIds: string[]; on
                 Will create <b style={{ color: 'var(--accent)' }}>{fresh.length}</b>.
               </div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, maxHeight: 90, overflowY: 'auto' }}>
-                {fresh.map(id => (
-                  <span key={id} style={{ fontSize: 9, fontFamily: 'Roboto Mono', padding: '1px 5px', borderRadius: 2, color: 'var(--accent)', border: '1px solid rgba(37,99,235,0.3)' }}>{prefix}{id}</span>
+                {fresh.map((id, i) => (
+                  <span key={id} title={id} style={{ fontSize: 9, fontFamily: 'Roboto Mono', padding: '1px 5px', borderRadius: 2, color: 'var(--accent)', border: '1px solid rgba(37,99,235,0.3)' }}>{prefix}{String(i + 1).padStart(String(fresh.length).length, '0')}</span>
                 ))}
                 {!fresh.length && <span style={{ fontSize: 10, color: 'var(--text-faint)' }}>No free nodes in the selection.</span>}
               </div>

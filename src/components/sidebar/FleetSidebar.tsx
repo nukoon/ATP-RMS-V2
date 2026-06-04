@@ -54,8 +54,9 @@ export function FleetSidebar({ robots, selectedId, onSelect, onAddAmr, onManageM
         )}
       </div>
 
-      {/* ALARMS (moved here from the right panel) */}
-      <div style={{ borderTop: '1px solid var(--border)', display: 'flex', flexDirection: 'column', maxHeight: '40%', minHeight: 130, flexShrink: 0 }}>
+      {/* ALARMS — distinct panel (different surface + heavier divider) so it
+          doesn't blend into the robot list above */}
+      <div style={{ borderTop: '2px solid var(--border)', background: 'var(--surface-2)', boxShadow: 'inset 0 6px 8px -8px rgba(0,0,0,0.4)', display: 'flex', flexDirection: 'column', maxHeight: '40%', minHeight: 130, flexShrink: 0 }}>
         <AlarmPanel onSelectRobot={onSelect} />
       </div>
     </div>
