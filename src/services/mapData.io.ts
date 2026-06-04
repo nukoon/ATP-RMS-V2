@@ -47,6 +47,7 @@ export interface ImportSummary {
   templatesNew: number
   templatesReused: number
   bindings: number
+  overwritten: number      // existing entities updated in place (matched by name)
   missingNodes: string[]   // node ids referenced by the file but absent on the current map
 }
 
@@ -102,8 +103,11 @@ export function parseMapDataFile(text: string): MapDataDoc {
   return doc as MapDataDoc
 }
 
-// Re-create every entity on the target DB with fresh ids. Additive (does not
-// delete existing data). Reloads the storage store at the end so the UI updates.
+// Upsert every entity on the target DB. Entities are matched to existing rows by
+// NAME (area/storage/dock/traffic) or CODE (templates): a match is UPDATED in
+// place (override), otherwise a new row is created with a fresh id. This keeps
+// import idempotent and avoids the backend's unique-name conflicts. Reloads the
+// storage store at the end so the UI updates.
 export async function importMapData(doc: MapDataDoc): Promise<ImportSummary> {
   const d = doc.data ?? ({} as MapDataDoc['data'])
   const cfg = useConfigStore.getState()
@@ -114,19 +118,36 @@ export async function importMapData(doc: MapDataDoc): Promise<ImportSummary> {
 
   const summary: ImportSummary = {
     areas: 0, storages: 0, docks: 0, trafficAreas: 0,
-    templatesNew: 0, templatesReused: 0, bindings: 0, missingNodes: [],
+    templatesNew: 0, templatesReused: 0, bindings: 0, overwritten: 0, missingNodes: [],
   }
 
-  // 1) areas (old id → new id)
+  // fetch current rows fresh so we can match by name regardless of store staleness
+  const [exAreas, exStorages, exDocks, exTraffic, exTemplates] = await Promise.all([
+    api.listAreas().catch(() => []), api.listStorages().catch(() => []),
+    api.listDocks().catch(() => []), api.listTrafficAreas().catch(() => []),
+    api.listActions().catch(() => []),
+  ])
+  const areaByName = new Map(exAreas.map(a => [a.name, a]))
+  const storageByName = new Map(exStorages.map(s => [s.name, s]))
+  const dockByName = new Map(exDocks.map(d2 => [d2.name, d2]))
+  const trafficByName = new Map(exTraffic.map(z => [z.name, z]))
+
+  // 1) areas — upsert by name (old id → resolved id)
   const areaIdMap = new Map<string, string>()
   for (const a of d.areas ?? []) {
-    const c = await api.createArea({ name: a.name, kind: a.kind, enabled: a.enabled, mapId })
-    areaIdMap.set(a.id, c.id); summary.areas++
+    const ex = areaByName.get(a.name)
+    if (ex) {
+      await api.updateArea(ex.id, { kind: a.kind, enabled: a.enabled })
+      areaIdMap.set(a.id, ex.id); summary.overwritten++
+    } else {
+      const c = await api.createArea({ name: a.name, kind: a.kind, enabled: a.enabled, mapId })
+      areaByName.set(c.name, c); areaIdMap.set(a.id, c.id)
+    }
+    summary.areas++
   }
 
-  // 2) action templates — dedupe by code against what's already there
-  const existing = await api.listActions().catch(() => [] as VdaActionTemplate[])
-  const byCode = new Map(existing.map(t => [t.code, t.id]))
+  // 2) action templates — match by code (update default params / meta on match)
+  const byCode = new Map(exTemplates.map(t => [t.code, t.id]))
   const templateIdMap = new Map<string, string>()
   for (const t of d.templates ?? []) {
     let id = byCode.get(t.code)
@@ -140,18 +161,24 @@ export async function importMapData(doc: MapDataDoc): Promise<ImportSummary> {
     templateIdMap.set(t.id, id)
   }
 
-  // 3) storages (remap areaId)
+  // 3) storages — upsert by name (remap areaId)
   const storageIdMap = new Map<string, string>()
   for (const s of d.storages ?? []) {
     checkNode(s.nodeId)
-    const c = await api.createStorage({
-      name: s.name, nodeId: s.nodeId, kind: s.kind, state: s.state, enabled: s.enabled,
-      label: s.label, mapId, areaId: s.areaId ? (areaIdMap.get(s.areaId) ?? null) : null,
-    })
-    storageIdMap.set(s.id, c.id); summary.storages++
+    const areaId = s.areaId ? (areaIdMap.get(s.areaId) ?? null) : null
+    const ex = storageByName.get(s.name)
+    if (ex) {
+      await api.updateStorage(ex.id, { nodeId: s.nodeId, kind: s.kind, state: s.state, enabled: s.enabled, label: s.label, areaId })
+      storageIdMap.set(s.id, ex.id); summary.overwritten++
+    } else {
+      const c = await api.createStorage({ name: s.name, nodeId: s.nodeId, kind: s.kind, state: s.state, enabled: s.enabled, label: s.label, mapId, areaId })
+      storageByName.set(c.name, c); storageIdMap.set(s.id, c.id)
+    }
+    summary.storages++
   }
 
-  // 4) per-storage action bindings (remap storageId + actionId)
+  // 4) per-storage action bindings (remap storageId + actionId; setStorageActions
+  //    replaces the storage's bindings, so this overrides existing ones too)
   for (const [oldSid, binds] of Object.entries(d.bindings ?? {})) {
     const newSid = storageIdMap.get(oldSid)
     if (!newSid) continue
@@ -162,17 +189,31 @@ export async function importMapData(doc: MapDataDoc): Promise<ImportSummary> {
     if (remapped.length) { await api.setStorageActions(newSid, remapped); summary.bindings += remapped.length }
   }
 
-  // 5) docks (park + charge)
+  // 5) docks (park + charge) — upsert by name
   for (const dk of d.docks ?? []) {
     checkNode(dk.nodeId)
-    await api.createDock({ name: dk.name, nodeId: dk.nodeId, type: dk.type, agvId: dk.agvId ?? null, enabled: dk.enabled, mapId })
+    const ex = dockByName.get(dk.name)
+    if (ex) {
+      await api.updateDock(ex.id, { nodeId: dk.nodeId, type: dk.type, agvId: dk.agvId ?? null, enabled: dk.enabled })
+      summary.overwritten++
+    } else {
+      const c = await api.createDock({ name: dk.name, nodeId: dk.nodeId, type: dk.type, agvId: dk.agvId ?? null, enabled: dk.enabled, mapId })
+      dockByName.set(c.name, c)
+    }
     summary.docks++
   }
 
-  // 6) traffic zones
+  // 6) traffic zones — upsert by name
   for (const z of d.trafficAreas ?? []) {
     (z.nodeIds ?? []).forEach(checkNode)
-    await api.createTrafficArea({ name: z.name, nodeIds: z.nodeIds, capacity: z.capacity, enabled: z.enabled, mapId })
+    const ex = trafficByName.get(z.name)
+    if (ex) {
+      await api.updateTrafficArea(ex.id, { nodeIds: z.nodeIds, capacity: z.capacity, enabled: z.enabled })
+      summary.overwritten++
+    } else {
+      const c = await api.createTrafficArea({ name: z.name, nodeIds: z.nodeIds, capacity: z.capacity, enabled: z.enabled, mapId })
+      trafficByName.set(c.name, c)
+    }
     summary.trafficAreas++
   }
 

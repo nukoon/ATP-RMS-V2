@@ -60,6 +60,7 @@ function PortabilityBar() {
       const doc = parseMapDataFile(await file.text())
       const s = await importMapData(doc)
       let m = `Imported — ${s.storages} stock · ${s.areas} areas · ${s.docks} docks · ${s.trafficAreas} traffic · ${s.bindings} action(s)`
+      if (s.overwritten) m += ` (${s.overwritten} overwritten)`
       if (s.missingNodes.length) m += ` ⚠ ${s.missingNodes.length} node id(s) not on this map: ${s.missingNodes.slice(0, 5).join(', ')}${s.missingNodes.length > 5 ? '…' : ''}`
       setMsg(m)
     } catch (e) { setErr(e instanceof Error ? e.message : 'import failed') }
