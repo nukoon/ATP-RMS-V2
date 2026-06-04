@@ -15,7 +15,7 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import type { FleetMap, Robot, MapViewConfig, MapCurve, AgvModel } from '@/types'
 import type { Storage } from '@/types/fleet'
-import { STATUS_COLOR } from '@/constants'
+import { STATUS_COLOR, STATUS_LABEL } from '@/constants'
 import { getMapBounds } from '@/services/map.service'
 import { useStorageStore } from '@/store/storage.store'
 import { useFleetStore } from '@/store/fleet.store'
@@ -50,6 +50,10 @@ const gltfLoader = new GLTFLoader()
 const MODEL_YAW_DEG = 90
 const DEBUG_HEADING = false   // temporary: draw a red +X arrow to tune MODEL_YAW_DEG
 
+// floating status+speed chip under each robot's id label
+const STATUS_H = 0.6                       // billboard height (m)
+const STATUS_BG = 'rgba(15,23,34,0.92)'    // dark tooltip box, reads on both themes
+
 // world (metres) → scene vector on the ground plane
 const vec = (x: number, y: number, h = 0) => new THREE.Vector3(x, h, -y)
 
@@ -83,7 +87,7 @@ function sampleCurve(c: MapCurve, n = 18): { x: number; y: number }[] {
 
 // Billboard text label as a canvas-texture sprite. depthTest off so it stays
 // readable on top of geometry; a Sprite always faces the camera.
-function makeLabel(text: string, fg: string, bg: string, heightM: number): THREE.Sprite {
+function drawLabelTexture(text: string, fg: string, bg: string): { tex: THREE.CanvasTexture; w: number; h: number } {
   const fontPx = 64, padX = 18, padY = 12, rr = 16
   const c = document.createElement('canvas')
   const ctx = c.getContext('2d')!
@@ -98,10 +102,22 @@ function makeLabel(text: string, fg: string, bg: string, heightM: number): THREE
   ctx.closePath(); ctx.fillStyle = bg; ctx.fill()
   ctx.fillStyle = fg; ctx.fillText(text, w / 2, h / 2 + 1)
   const tex = new THREE.CanvasTexture(c); tex.minFilter = THREE.LinearFilter
+  return { tex, w, h }
+}
+function makeLabel(text: string, fg: string, bg: string, heightM: number): THREE.Sprite {
+  const { tex, w, h } = drawLabelTexture(text, fg, bg)
   const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false }))
   sp.scale.set(heightM * w / h, heightM, 1)
   sp.renderOrder = 20
   return sp
+}
+// Re-draw an existing label sprite's text/colours in place (swaps the texture,
+// rescales for the new aspect). Used for the live status+speed chip.
+function setSpriteText(sp: THREE.Sprite, text: string, fg: string, bg: string, heightM: number) {
+  const { tex, w, h } = drawLabelTexture(text, fg, bg)
+  const mat = sp.material as THREE.SpriteMaterial
+  mat.map?.dispose(); mat.map = tex; mat.needsUpdate = true
+  sp.scale.set(heightM * w / h, heightM, 1)
 }
 const hex6 = (n: number) => '#' + n.toString(16).padStart(6, '0')
 
@@ -373,11 +389,26 @@ export function Map3DCanvas({ map, robots, config, selectedRobotId, onRobotClick
             const ph = captured.getObjectByName('placeholder'); if (ph) captured.remove(ph)
           }).catch(() => { /* keep the placeholder box if the model fails to load */ })
           // floating id label (white text on the robot's identity colour)
-          const label = makeLabel(r.id, '#ffffff', hex6(col), 0.9)
+          const label = makeLabel(r.id, '#ffffff', hex6(col), 0.82)
           label.name = 'label'; captured.add(label)
+          // status + speed chip, sits just below the id label (live-updated)
+          const status = makeLabel('Idle · 0.0 m/s', STATUS_COLOR[r.status], STATUS_BG, STATUS_H)
+          status.name = 'status'; captured.add(status)
         }
         const selected = selRef.current === r.id
-        const label = g.getObjectByName('label'); if (label) label.position.y = len * 0.55 + 1.3
+        const labelY = len * 0.55 + 1.55
+        const label = g.getObjectByName('label'); if (label) label.position.y = labelY
+        // live status + speed: re-bake the chip only when the text/colour changes
+        const status = g.getObjectByName('status') as THREE.Sprite | null
+        if (status) {
+          const sc = STATUS_COLOR[r.status]
+          const txt = `${STATUS_LABEL[r.status]} · ${Math.hypot(r.velocity.vx, r.velocity.vy).toFixed(1)} m/s`
+          if (g.userData.statusTxt !== txt || g.userData.statusFg !== sc) {
+            setSpriteText(status, txt, sc, STATUS_BG, STATUS_H)
+            g.userData.statusTxt = txt; g.userData.statusFg = sc
+          }
+          status.position.y = labelY - (0.82 + STATUS_H) / 2 - 0.06
+        }
         const ring = g.getObjectByName('ring') as THREE.Mesh
         const rm = ring.material as THREE.MeshBasicMaterial
         rm.color.setHex(col); rm.opacity = selected ? 1 : 0.8
