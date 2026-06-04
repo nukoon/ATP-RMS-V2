@@ -218,6 +218,7 @@ export interface MapViewConfig {
   showHeatmap: boolean         // overlay edge traffic-density heatmap
   showGrid: boolean            // background grid (2D + 3D)
   showRobots: boolean          // robot icons / models
+  showTraffic: boolean         // traffic-zone node markers
   nodeSize: number             // px
   labelSize: number            // px
   labelZoomThreshold: number   // show labels when zoom >= this

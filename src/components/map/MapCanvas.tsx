@@ -123,7 +123,7 @@ export function MapCanvas({ map, robots, config, selectedRobotId, onRobotClick, 
     const storageNodes = config.showStorage
       ? new Set(storagesRef.current.filter(s => s.enabled).map(s => s.nodeId))
       : EMPTY_SET
-    drawTrafficAreas(ctx, map, trafficRef.current, tt, config)
+    if (config.showTraffic) drawTrafficAreas(ctx, map, trafficRef.current, tt, config)
     if (config.showStorage) drawAreas(ctx, map, areasRef.current, storagesRef.current, tt, config)
     drawNodes(ctx, map, tt, config, storageNodes)
     if (config.showStorage) drawDocks(ctx, map, docksRef.current, tt)
@@ -488,21 +488,26 @@ function drawAreas(ctx: CanvasRenderingContext2D, map: FleetMap, areas: StorageA
 }
 
 // TRAFFIC AREAS: operator-defined mutual-exclusion zones (red hatched box).
+// distinct colour per traffic zone (cycled)
+const TRAFFIC_COLORS = ['#dc2626', '#7c3aed', '#0891b2', '#ea7a00', '#16a34a', '#db2777', '#2563eb', '#f59e0b']
 function drawTrafficAreas(ctx: CanvasRenderingContext2D, map: FleetMap, zones: TrafficArea[], t: Transform, _cfg: MapViewConfig) {
-  // a simple red ring marking each node in the zone — no box, no name label
-  const col = '#dc2626'
-  const r = Math.max(5, t.scale * 0.55)
-  for (const z of zones) {
-    if (!z.enabled) continue
+  // a small DASHED ring per node in each zone — no box, no name label
+  const r = Math.max(5, t.scale * 0.5)
+  const dash = Math.max(2, r * 0.5)
+  ctx.lineWidth = 1.4; ctx.lineCap = 'round'
+  zones.forEach((z, zi) => {
+    if (!z.enabled) return
+    const col = TRAFFIC_COLORS[zi % TRAFFIC_COLORS.length]
     for (const id of z.nodeIds) {
       const p = map.points.find(n => n.id === id)
       if (!p) continue
       const { sx, sy } = worldToScreen(p.x, p.y, t)
       ctx.beginPath(); ctx.arc(sx, sy, r, 0, Math.PI * 2)
-      ctx.fillStyle = col + '1f'; ctx.fill()
-      ctx.strokeStyle = col + 'cc'; ctx.lineWidth = 1.6; ctx.setLineDash([]); ctx.stroke()
+      ctx.fillStyle = col + '14'; ctx.fill()
+      ctx.strokeStyle = col + 'dd'; ctx.setLineDash([dash, dash]); ctx.stroke()
     }
-  }
+  })
+  ctx.setLineDash([]); ctx.lineCap = 'butt'
 }
 
 // DOCKS: parking & charging points — a solid colour badge with a white glyph

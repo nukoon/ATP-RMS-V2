@@ -18,6 +18,7 @@ import type { Storage } from '@/types/fleet'
 import { STATUS_COLOR } from '@/constants'
 import { getMapBounds } from '@/services/map.service'
 import { useStorageStore } from '@/store/storage.store'
+import { useFleetStore } from '@/store/fleet.store'
 import { useThemeStore } from '@/store/theme.store'
 import { getCanvas } from '@/theme'
 
@@ -116,6 +117,13 @@ export function Map3DCanvas({ map, robots, config, selectedRobotId, onRobotClick
   const clickRef  = useRef(onRobotClick);    clickRef.current = onRobotClick
   const stockRef  = useRef<Storage[]>(storages); stockRef.current = storages
   const areasRef  = useRef(areas); areasRef.current = areas
+  // storages reserved by an active job → show an "occupy" ring (like the 2D map)
+  const missions = useFleetStore(s => s.missions)
+  const occupiedRef = useRef<Set<string>>(new Set())
+  occupiedRef.current = new Set(
+    missions.filter(m => m.status === 'EXECUTING' || m.status === 'ASSIGNED')
+      .flatMap(m => [m.pickupStorageId, m.dropoffStorageId]).filter((id): id is string => !!id),
+  )
 
   useEffect(() => {
     const mount = mountRef.current
@@ -223,6 +231,7 @@ export function Map3DCanvas({ map, robots, config, selectedRobotId, onRobotClick
     //    when EMPTY so the location stays visible. ──
     const stockLayer = new THREE.Group(); scene.add(stockLayer)
     const emptyGeo = new THREE.BoxGeometry(1.3, 0.12, 1.3)
+    const occupyGeo = new THREE.RingGeometry(0.78, 1.0, 32)
     const stockGroups = new Map<string, THREE.Group>()
     const syncStock = () => {
       const seen = new Set<string>()
@@ -236,10 +245,15 @@ export function Map3DCanvas({ map, robots, config, selectedRobotId, onRobotClick
           const empty = new THREE.Mesh(emptyGeo, new THREE.MeshStandardMaterial({ color: 0x9aa8bb, transparent: true, opacity: 0.3 }))
           empty.name = 'empty'; empty.position.y = 0.06
           g.add(empty)
+          // "occupy" ring — shown when a running job reserves this storage
+          const occ = new THREE.Mesh(occupyGeo, new THREE.MeshBasicMaterial({ color: 0x22d3ee, transparent: true, opacity: 0.95, side: THREE.DoubleSide, depthWrite: false }))
+          occ.name = 'occupy'; occ.rotation.x = -Math.PI / 2; occ.position.y = 0.05; occ.visible = false; occ.renderOrder = 5
+          g.add(occ)
           stockGroups.set(s.id, g); stockLayer.add(g)
         }
         const full = s.state === 'FULL'
         const empty = g.getObjectByName('empty'); if (empty) empty.visible = !full
+        const occ = g.getObjectByName('occupy'); if (occ) occ.visible = occupiedRef.current.has(s.id)
         // The goods glb is heavy, so clone it lazily and ONLY for FULL storages
         // (cloning one per storage up-front overwhelmed the renderer). Reused
         // and toggled once created.
