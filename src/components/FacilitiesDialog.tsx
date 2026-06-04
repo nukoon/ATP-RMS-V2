@@ -6,12 +6,12 @@
 import { useState } from 'react'
 import { useStorageStore } from '@/store/storage.store'
 import { useFleetStore } from '@/store/fleet.store'
-import type { DockType } from '@/types/fleet'
+import type { DockType, TrafficArea } from '@/types/fleet'
 import { FLEET_ROSTER } from '@/constants/fleet-roster'
 
 type Tab = 'docks' | 'traffic'
 
-export function FacilitiesDialog({ onClose, onDrawTrafficArea }: { onClose: () => void; onDrawTrafficArea?: () => void }) {
+export function FacilitiesDialog({ onClose, onDrawTrafficArea, onEditTrafficZone }: { onClose: () => void; onDrawTrafficArea?: () => void; onEditTrafficZone?: (z: TrafficArea) => void }) {
   const [tab, setTab] = useState<Tab>('docks')
   return (
     <div onClick={onClose} style={ovl}>
@@ -29,7 +29,7 @@ export function FacilitiesDialog({ onClose, onDrawTrafficArea }: { onClose: () =
           ))}
         </div>
         <div style={{ overflowY: 'auto', padding: 14 }}>
-          {tab === 'docks' ? <DocksTab /> : <TrafficTab onDraw={onDrawTrafficArea} />}
+          {tab === 'docks' ? <DocksTab /> : <TrafficTab onDraw={onDrawTrafficArea} onEdit={onEditTrafficZone} />}
         </div>
       </div>
     </div>
@@ -100,7 +100,7 @@ function DocksTab() {
 }
 
 // ── Traffic areas tab: mutual-exclusion zones (drawn on the map) ──
-function TrafficTab({ onDraw }: { onDraw?: () => void }) {
+function TrafficTab({ onDraw, onEdit }: { onDraw?: () => void; onEdit?: (z: TrafficArea) => void }) {
   const { trafficAreas, updateTrafficArea, removeTrafficArea } = useStorageStore()
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -126,6 +126,7 @@ function TrafficTab({ onDraw }: { onDraw?: () => void }) {
             </label>
             <button onClick={() => updateTrafficArea(z.id, { enabled: !z.enabled }).catch(() => {})}
               style={{ ...miniBtn, color: z.enabled ? '#16a34a' : 'var(--text-faint)' }}>{z.enabled ? 'ON' : 'OFF'}</button>
+            {onEdit && <button onClick={() => onEdit(z)} title="Edit nodes / name" style={{ ...miniBtn, color: 'var(--accent)' }}>EDIT</button>}
             <button onClick={() => removeTrafficArea(z.id).catch(() => {})} style={{ ...miniBtn, color: '#dc2626' }}>×</button>
           </div>
         ))}

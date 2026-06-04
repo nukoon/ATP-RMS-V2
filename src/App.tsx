@@ -18,7 +18,7 @@ import { OrderPanel }   from '@/components/panels/OrderPanel'
 import { StoragePanel } from '@/components/panels/StoragePanel'
 import { StorageDialog } from '@/components/StorageDialog'
 import { MultiStorageDialog } from '@/components/MultiStorageDialog'
-import { TrafficAreaDialog } from '@/components/TrafficAreaDialog'
+import { TrafficAreaDialog, type TrafficDraft } from '@/components/TrafficAreaDialog'
 import { FacilitiesDialog } from '@/components/FacilitiesDialog'
 import { DashboardDialog } from '@/components/DashboardDialog'
 import { HistoryDialog } from '@/components/HistoryDialog'
@@ -49,7 +49,9 @@ export default function App() {
   const toggleTheme = useThemeStore(s => s.toggle)
   // lasso nodes on the map → either bulk storage, or a traffic area
   const [lasso, setLasso] = useState<null | 'storage' | 'traffic'>(null)
-  const [picked, setPicked] = useState<{ purpose: 'storage' | 'traffic'; ids: string[] } | null>(null)
+  const [picked, setPicked] = useState<{ purpose: 'storage'; ids: string[] } | null>(null)
+  const [trafficEdit, setTrafficEdit] = useState<TrafficDraft | null>(null)   // create/edit a traffic zone
+  const trafficAreas = useStorageStore(s => s.trafficAreas)
   // right-click context menu on a storage area (batch FULL/EMPTY)
   const [areaMenu, setAreaMenu] = useState<{ areaId: string; x: number; y: number } | null>(null)
   const setAreaState = useStorageStore(s => s.setAreaState)
@@ -216,7 +218,15 @@ export default function App() {
                 onHover={setCursor}
                 ctrl={ctrl}
                 selectMode={!!lasso}
-                onSelectNodes={(ids) => { const p = lasso; setLasso(null); if (p && ids.length) setPicked({ purpose: p, ids }) }}
+                onSelectNodes={(ids) => {
+                  const p = lasso; setLasso(null)
+                  if (!ids.length) return
+                  if (p === 'storage') setPicked({ purpose: 'storage', ids })
+                  else if (p === 'traffic') setTrafficEdit(d => {
+                    const base = d ?? { name: `TZ-${trafficAreas.length + 1}`, capacity: 1, nodeIds: [] }
+                    return { ...base, nodeIds: [...new Set([...base.nodeIds, ...ids])] }   // additive
+                  })
+                }}
                 onAreaContextMenu={(areaId, x, y) => setAreaMenu({ areaId, x, y })}
               />
             )
@@ -245,7 +255,7 @@ export default function App() {
             <div style={{ position: 'absolute', top: 10, left: '50%', transform: 'translateX(-50%)', zIndex: 6,
               display: 'flex', alignItems: 'center', gap: 10, background: 'var(--surface)', border: `1px solid ${lasso === 'traffic' ? '#dc2626' : 'var(--accent)'}`,
               borderRadius: 4, padding: '6px 12px', boxShadow: '0 4px 14px rgba(26,34,48,0.15)' }}>
-              <span style={{ fontSize: 11, color: 'var(--text)' }}>▭ {lasso === 'traffic' ? 'ลากกรอบคลุมโหนด เพื่อสร้าง Traffic Area (โซนห้ามเข้าซ้อน)' : 'ลากกรอบคลุมโหนดที่ต้องการ เพื่อเพิ่ม Storage หลายจุด'}</span>
+              <span style={{ fontSize: 11, color: 'var(--text)' }}>▭ {lasso === 'traffic' ? (trafficEdit?.nodeIds.length ? 'ลากกรอบคลุมโหนด เพื่อ "เพิ่ม" เข้าโซน Traffic' : 'ลากกรอบคลุมโหนด เพื่อสร้าง Traffic Area (โซนห้ามเข้าซ้อน)') : 'ลากกรอบคลุมโหนดที่ต้องการ เพื่อเพิ่ม Storage หลายจุด'}</span>
               <button onClick={() => setLasso(null)}
                 style={{ fontSize: 10, color: '#dc2626', background: 'transparent', border: '1px solid rgba(220,38,38,0.35)', borderRadius: 2, cursor: 'pointer', padding: '2px 8px' }}>CANCEL</button>
             </div>
@@ -304,11 +314,17 @@ export default function App() {
 
       {showConfig && <ConfigDialog initialTab={configTab} onClose={() => setShowConfig(false)} />}
       {showStorageDialog && <StorageDialog onClose={() => setShowStorageDialog(false)} />}
-      {showFacilities && <FacilitiesDialog onClose={() => setShowFacilities(false)} onDrawTrafficArea={() => { setShowFacilities(false); setSelectedRobotId(null); setLasso('traffic') }} />}
+      {showFacilities && <FacilitiesDialog onClose={() => setShowFacilities(false)}
+        onDrawTrafficArea={() => { setShowFacilities(false); setSelectedRobotId(null); setTrafficEdit(null); setLasso('traffic') }}
+        onEditTrafficZone={(z) => { setShowFacilities(false); setTrafficEdit({ id: z.id, name: z.name, capacity: z.capacity, nodeIds: [...z.nodeIds] }) }} />}
       {showDashboard && <DashboardDialog onClose={() => setShowDashboard(false)} />}
       {showHistory && <HistoryDialog onClose={() => setShowHistory(false)} />}
       {picked?.purpose === 'storage' && <MultiStorageDialog nodeIds={picked.ids} onClose={() => setPicked(null)} />}
-      {picked?.purpose === 'traffic' && <TrafficAreaDialog nodeIds={picked.ids} onClose={() => setPicked(null)} />}
+      {trafficEdit && !lasso && (
+        <TrafficAreaDialog draft={trafficEdit} onChange={setTrafficEdit}
+          onAddFromMap={() => { setSelectedRobotId(null); setLasso('traffic') }}
+          onClose={() => setTrafficEdit(null)} />
+      )}
 
       {/* right-click area menu: batch FULL/EMPTY all members */}
       {areaMenu && (() => {
