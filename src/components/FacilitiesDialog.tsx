@@ -3,11 +3,12 @@
  * DOCKS and mutual-exclusion TRAFFIC areas. Split out from the Storage editor
  * so the two concerns don't get mixed up.
  */
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useStorageStore } from '@/store/storage.store'
 import { useFleetStore } from '@/store/fleet.store'
 import type { DockType, TrafficArea } from '@/types/fleet'
 import { FLEET_ROSTER } from '@/constants/fleet-roster'
+import { downloadMapData, parseMapDataFile, importMapData } from '@/services/mapData.io'
 
 type Tab = 'docks' | 'traffic'
 
@@ -28,10 +29,57 @@ export function FacilitiesDialog({ onClose, onDrawTrafficArea, onEditTrafficZone
                 border: 'none', borderBottom: tab === k ? '2px solid var(--accent)' : '2px solid transparent' }}>{l}</button>
           ))}
         </div>
-        <div style={{ overflowY: 'auto', padding: 14 }}>
+        <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: 14 }}>
           {tab === 'docks' ? <DocksTab /> : <TrafficTab onDraw={onDrawTrafficArea} onEdit={onEditTrafficZone} />}
         </div>
+        <PortabilityBar />
       </div>
+    </div>
+  )
+}
+
+// ── Export / Import the whole operating dataset (stock + docks + traffic) ──
+function PortabilityBar() {
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState('')
+  const [err, setErr] = useState('')
+  const fileRef = useRef<HTMLInputElement>(null)
+
+  const onExport = async () => {
+    setErr(''); setMsg(''); setBusy(true)
+    try {
+      const doc = await downloadMapData()
+      setMsg(`Exported — ${doc.counts.storages} stock · ${doc.counts.areas} areas · ${doc.counts.docks} docks · ${doc.counts.trafficAreas} traffic`)
+    } catch (e) { setErr(e instanceof Error ? e.message : 'export failed') }
+    finally { setBusy(false) }
+  }
+
+  const onImport = async (file: File) => {
+    setErr(''); setMsg(''); setBusy(true)
+    try {
+      const doc = parseMapDataFile(await file.text())
+      const s = await importMapData(doc)
+      let m = `Imported — ${s.storages} stock · ${s.areas} areas · ${s.docks} docks · ${s.trafficAreas} traffic · ${s.bindings} action(s)`
+      if (s.missingNodes.length) m += ` ⚠ ${s.missingNodes.length} node id(s) not on this map: ${s.missingNodes.slice(0, 5).join(', ')}${s.missingNodes.length > 5 ? '…' : ''}`
+      setMsg(m)
+    } catch (e) { setErr(e instanceof Error ? e.message : 'import failed') }
+    finally { setBusy(false); if (fileRef.current) fileRef.current.value = '' }
+  }
+
+  return (
+    <div style={{ borderTop: '1px solid var(--border)', background: 'var(--surface-2)', padding: '10px 14px', display: 'flex', flexDirection: 'column', gap: 7 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span style={{ fontSize: 9, letterSpacing: 1, color: 'var(--text-muted)', textTransform: 'uppercase', marginRight: 'auto' }}>Portability</span>
+        <button onClick={onExport} disabled={busy} style={{ ...ioBtn, opacity: busy ? 0.5 : 1 }}>⤓ EXPORT</button>
+        <button onClick={() => fileRef.current?.click()} disabled={busy} style={{ ...ioBtn, opacity: busy ? 0.5 : 1 }}>⤒ IMPORT</button>
+        <input ref={fileRef} type="file" accept="application/json,.json" style={{ display: 'none' }}
+          onChange={e => { const f = e.target.files?.[0]; if (f) onImport(f) }} />
+      </div>
+      <div style={{ fontSize: 9, color: 'var(--text-faint)', lineHeight: 1.5 }}>
+        Save all stock, areas, docks (park/charge) &amp; traffic zones to a JSON file to move to another machine. Import is additive — load the matching map first so node ids resolve.
+      </div>
+      {msg && <div style={{ fontSize: 10, color: '#16a34a' }}>{msg}</div>}
+      {err && <div style={{ fontSize: 10, color: '#dc2626' }}>{err}</div>}
     </div>
   )
 }
@@ -145,3 +193,4 @@ const panel: React.CSSProperties = { width: 560, maxHeight: '84vh', background: 
 const inp: React.CSSProperties = { background: 'var(--surface-2)', color: 'var(--text)', border: '1px solid var(--border)', borderRadius: 2, padding: '5px 7px', fontSize: 10, fontFamily: 'Roboto Mono', width: '100%', boxSizing: 'border-box' }
 const primaryBtn: React.CSSProperties = { padding: '6px 14px', fontSize: 11, fontWeight: 600, letterSpacing: 1, borderRadius: 2, cursor: 'pointer', color: '#16a34a', border: '1px solid rgba(22,163,74,0.4)', background: 'rgba(22,163,74,0.08)' }
 const miniBtn: React.CSSProperties = { fontSize: 9, padding: '2px 6px', borderRadius: 2, cursor: 'pointer', color: 'var(--text-muted)', border: '1px solid var(--border)', background: 'transparent', fontFamily: 'Roboto Mono' }
+const ioBtn: React.CSSProperties = { fontSize: 10, fontWeight: 600, letterSpacing: 0.5, padding: '5px 12px', borderRadius: 3, cursor: 'pointer', color: 'var(--accent)', border: '1px solid rgba(37,99,235,0.4)', background: 'rgba(37,99,235,0.08)', fontFamily: 'Roboto Mono', whiteSpace: 'nowrap' }
