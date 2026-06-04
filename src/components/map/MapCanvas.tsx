@@ -30,6 +30,18 @@ interface Props {
 
 const EMPTY_SET: Set<string> = new Set()
 
+// The simulator emits pose at 10 Hz (TICK_MS = 100). The render loop runs at
+// ~60 fps, so a robot drawn straight from the last emitted pose visibly steps
+// 10×/s. We ease the *displayed* pose toward the latest one over one tick so
+// motion reads smooth at 60 fps (entity interpolation, ~one tick of latency).
+const INTERP_MS = 100
+type Interp = { fx: number; fy: number; fth: number; tx: number; ty: number; tth: number; t0: number }
+// shortest-arc angle lerp in degrees
+function angLerp(from: number, to: number, a: number): number {
+  const d = ((to - from + 540) % 360) - 180
+  return from + d * a
+}
+
 // Image cache
 const imgCache = new Map<string, HTMLImageElement>()
 function getCachedImg(src: string): HTMLImageElement {
@@ -84,6 +96,8 @@ export function MapCanvas({ map, robots, config, selectedRobotId, onRobotClick, 
   const [selectedNode, setSelectedNode] = useState<MapPoint | null>(null)
   const selectedNodeRef = useRef<MapPoint | null>(null)
   selectedNodeRef.current = selectedNode
+  // per-robot interpolation state (persists across re-renders / rAF restarts)
+  const interpRef = useRef<Map<string, Interp>>(new Map())
 
   // Keep canvas pixel size in sync with its CSS box; fit map on first size
   useEffect(() => {
@@ -128,7 +142,36 @@ export function MapCanvas({ map, robots, config, selectedRobotId, onRobotClick, 
     drawNodes(ctx, map, tt, config, storageNodes)
     if (config.showStorage) drawDocks(ctx, map, docksRef.current, tt)
     if (config.showStorage) drawStorages(ctx, map, storagesRef.current, occupiedRef.current, tt, config)
-    if (config.showRobots) robots.forEach(r => drawRobot(ctx, r, tt, config, selectedRobotId))
+    if (config.showRobots) {
+      const interp = interpRef.current
+      const now = performance.now()
+      const live = new Set<string>()
+      for (const r of robots) {
+        live.add(r.id)
+        const p = r.pose
+        let e = interp.get(r.id)
+        if (!e) {                       // first sight: snap, no ease
+          e = { fx: p.x, fy: p.y, fth: p.theta, tx: p.x, ty: p.y, tth: p.theta, t0: now }
+          interp.set(r.id, e)
+        } else if (e.tx !== p.x || e.ty !== p.y || e.tth !== p.theta) {
+          // new target arrived → ease from the currently-displayed pose
+          const a = Math.min(1, (now - e.t0) / INTERP_MS)
+          e.fx = e.fx + (e.tx - e.fx) * a
+          e.fy = e.fy + (e.ty - e.fy) * a
+          e.fth = angLerp(e.fth, e.tth, a)
+          e.tx = p.x; e.ty = p.y; e.tth = p.theta; e.t0 = now
+        }
+        const a = Math.min(1, (now - e.t0) / INTERP_MS)
+        const pose = {
+          ...p,
+          x: e.fx + (e.tx - e.fx) * a,
+          y: e.fy + (e.ty - e.fy) * a,
+          theta: angLerp(e.fth, e.tth, a),
+        }
+        drawRobot(ctx, { ...r, pose }, tt, config, selectedRobotId)
+      }
+      for (const id of interp.keys()) if (!live.has(id)) interp.delete(id)  // drop gone robots
+    }
 
     // highlight the clicked node
     const sn = selectedNodeRef.current
