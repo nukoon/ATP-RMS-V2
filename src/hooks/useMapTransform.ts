@@ -45,5 +45,16 @@ export function useMapTransform(map: FleetMap | null) {
   const zoomIn  = useCallback(() => setTransform(t => zoomAt(t, 1.3,  sizeRef.current.w / 2, sizeRef.current.h / 2)), [])
   const zoomOut = useCallback(() => setTransform(t => zoomAt(t, 0.77, sizeRef.current.w / 2, sizeRef.current.h / 2)), [])
 
-  return { transform, fitToCanvas, handleWheel, handleMouseDown, handleMouseMove, handleMouseUp, zoomIn, zoomOut }
+  // pan (and gently zoom in) so a world point sits at the canvas centre — used
+  // by "View Location" to jump the camera to a selected robot.
+  const centerOnWorld = useCallback((wx: number, wy: number) => {
+    const { w, h } = sizeRef.current
+    if (!w || !h) return
+    setTransform(t => {
+      const scale = Math.max(t.scale, 8)   // ensure a close-enough look
+      return { scale, offsetX: w / 2 - wx * scale, offsetY: h / 2 + wy * scale }   // Y-flip
+    })
+  }, [])
+
+  return { transform, fitToCanvas, handleWheel, handleMouseDown, handleMouseMove, handleMouseUp, zoomIn, zoomOut, centerOnWorld }
 }

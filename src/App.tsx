@@ -38,7 +38,7 @@ export default function App() {
   const [tab, setTab] = useState<RightTab>('missions')
   const [cursor, setCursor] = useState<{ x: number; y: number } | null>(null)
   const [showConfig, setShowConfig] = useState(false)
-  const [configTab, setConfigTab] = useState<'amrs' | 'maps' | 'broker'>('amrs')
+  const [configTab, setConfigTab] = useState<'amrs' | 'maps' | 'broker' | 'users'>('amrs')
   const [live, setLive] = useState(false)
   const [showStorageDialog, setShowStorageDialog] = useState(false)
   const [showFacilities, setShowFacilities] = useState(false)   // docks + traffic
@@ -54,9 +54,15 @@ export default function App() {
   const trafficAreas = useStorageStore(s => s.trafficAreas)
   // right-click context menu on a storage area (batch FULL/EMPTY)
   const [areaMenu, setAreaMenu] = useState<{ areaId: string; x: number; y: number } | null>(null)
+  const [storageMenu, setStorageMenu] = useState<{ id: string; x: number; y: number } | null>(null)
+  // job pick-on-map: pick pickup/dropoff stock or pick/drop area by clicking the map
+  const [pickMode, setPickMode] = useState<null | 'pickup' | 'dropoff' | 'pickArea' | 'dropArea'>(null)
+  const [jobSel, setJobSel] = useState<{ pickup?: string; dropoff?: string; pickArea?: string; dropArea?: string }>({})
   const setAreaState = useStorageStore(s => s.setAreaState)
+  const setStorageState = useStorageStore(s => s.setState)
   const storageAreas = useStorageStore(s => s.areas)
-  const openConfig = (t: 'amrs' | 'maps' | 'broker') => { setConfigTab(t); setShowConfig(true) }
+  const storages = useStorageStore(s => s.storages)
+  const openConfig = (t: 'amrs' | 'maps' | 'broker' | 'users') => { setConfigTab(t); setShowConfig(true) }
   const missions = useFleetStore(s => s.missions)
 
   const { maps, activeMapId, amrs, broker, loadAmrs } = useConfigStore()
@@ -113,6 +119,14 @@ export default function App() {
 
   useEffect(() => () => { simulationService.stop(); mqttService.disconnect() }, [])
 
+  // Esc cancels an in-progress job pick-on-map
+  useEffect(() => {
+    if (!pickMode) return
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setPickMode(null) }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [pickMode])
+
   const robotList = [...robots.values()]
   const selectedRobot = selectedRobotId ? robots.get(selectedRobotId) ?? null : null
 
@@ -167,7 +181,15 @@ export default function App() {
           <span style={{ width: 1, height: 18, background: 'var(--border)', margin: '0 2px' }} />
           <span style={{ fontFamily: 'Roboto Mono', fontSize: 9, color: 'var(--text-2)' }} title={authUser?.role}>
             ◐ {authUser?.realName || authUser?.username || 'user'}
+            {authUser?.role && <span style={{ marginLeft: 4, fontSize: 8, color: 'var(--text-faint)' }}>· {authUser.role}</span>}
           </span>
+          {authUser?.role === 'ADMIN' && (
+            <button onClick={() => openConfig('users')} title="User management"
+              style={{ fontFamily: 'Roboto Mono', fontSize: 9, cursor: 'pointer', color: 'var(--accent)',
+                border: '1px solid rgba(37,99,235,0.4)', background: 'rgba(37,99,235,0.06)', padding: '2px 7px', borderRadius: 2 }}>
+              ⚇ USERS
+            </button>
+          )}
           <button onClick={() => { if (live) mqttService.disconnect(); simulationService.stop(); clearAuth() }}
             title="Sign out"
             style={{ fontFamily: 'Roboto Mono', fontSize: 9, cursor: 'pointer', color: '#dc2626',
@@ -227,11 +249,30 @@ export default function App() {
                     return { ...base, nodeIds: [...new Set([...base.nodeIds, ...ids])] }   // additive
                   })
                 }}
-                onAreaContextMenu={(areaId, x, y) => setAreaMenu({ areaId, x, y })}
+                onAreaContextMenu={(areaId, x, y) => { setStorageMenu(null); setAreaMenu({ areaId, x, y }) }}
+                onStorageContextMenu={(id, x, y) => { setAreaMenu(null); setStorageMenu({ id, x, y }) }}
+                pickMode={pickMode}
+                onMapPick={(mode, id) => { if (id) { setJobSel(s => ({ ...s, [mode]: id })); setPickMode(null) } }}
               />
             )
           ) : (
             <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-faint)', fontFamily: 'Roboto Mono', fontSize: 11 }}>Loading map...</div>
+          )}
+          {/* job pick-on-map banner */}
+          {pickMode && !view3d && (
+            <div style={{ position: 'absolute', top: 10, left: '50%', transform: 'translateX(-50%)', zIndex: 7,
+              display: 'flex', alignItems: 'center', gap: 10, padding: '6px 12px', borderRadius: 8,
+              background: 'rgba(124,58,237,0.96)', color: '#fff', boxShadow: '0 4px 14px rgba(26,34,48,0.25)',
+              fontFamily: 'Roboto Mono, "Noto Sans JP", monospace', fontSize: 11 }}>
+              📍 Click the {pickMode === 'pickup' ? 'PICKUP stock' : pickMode === 'dropoff' ? 'DROPOFF stock' : pickMode === 'pickArea' ? 'PICK area' : 'DROP area'} on the map
+              <button onClick={() => setPickMode(null)} style={{ background: 'rgba(255,255,255,0.2)', border: 'none', color: '#fff', cursor: 'pointer', borderRadius: 4, padding: '1px 7px', fontSize: 10 }}>Esc ✕</button>
+            </div>
+          )}
+          {pickMode && view3d && (
+            <div style={{ position: 'absolute', top: 10, left: '50%', transform: 'translateX(-50%)', zIndex: 7, padding: '6px 12px', borderRadius: 8,
+              background: 'rgba(124,58,237,0.96)', color: '#fff', fontFamily: 'Roboto Mono', fontSize: 11 }}>
+              Switch to 2D to pick on the map
+            </div>
           )}
           {/* 2D ↔ 3D view switch (top-right of the map) */}
           {map && (
@@ -268,7 +309,10 @@ export default function App() {
             <RobotDetail
               robot={selectedRobot}
               onClose={() => setSelectedRobotId(null)}
-              onAction={(a) => simulationService.command(selectedRobot.id, a)}
+              onAction={(a) => {
+                if (a === 'VIEW') { ctrl.centerOnWorld(selectedRobot.pose.x, selectedRobot.pose.y); return }
+                simulationService.command(selectedRobot.id, a)
+              }}
             />
           ) : (
             <>
@@ -287,7 +331,11 @@ export default function App() {
 
               {/* Tab body */}
               <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-                {tab === 'missions' && <OrderPanel onManageStorage={() => setShowStorageDialog(true)} />}
+                {tab === 'missions' && (
+                  <OrderPanel onManageStorage={() => setShowStorageDialog(true)}
+                    sel={jobSel} setSel={setJobSel} pickMode={pickMode}
+                    onRequestPick={(m) => { setLasso(null); setSelectedRobotId(null); setPickMode(m) }} />
+                )}
                 {tab === 'storage' && <StoragePanel onManage={() => setShowStorageDialog(true)} onMultiAdd={() => { setSelectedRobotId(null); setLasso('storage') }} />}
               </div>
 
@@ -342,6 +390,27 @@ export default function App() {
                 style={menuItem('#16a34a')}>● ALL FULL</button>
               <button onClick={() => { setAreaState(areaMenu.areaId, 'EMPTY').catch(() => {}); setAreaMenu(null) }}
                 style={menuItem('var(--text-muted)')}>○ ALL EMPTY</button>
+            </div>
+          </div>
+        )
+      })()}
+
+      {/* right-click single-storage menu: set this stock FULL / EMPTY (works for ungrouped too) */}
+      {storageMenu && (() => {
+        const s = storages.find(x => x.id === storageMenu.id)
+        return (
+          <div onClick={() => setStorageMenu(null)} onContextMenu={e => { e.preventDefault(); setStorageMenu(null) }}
+            style={{ position: 'fixed', inset: 0, zIndex: 1100 }}>
+            <div onClick={e => e.stopPropagation()}
+              style={{ position: 'absolute', left: Math.min(storageMenu.x, window.innerWidth - 160), top: Math.min(storageMenu.y, window.innerHeight - 130),
+                background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 4, boxShadow: '0 6px 18px rgba(26,34,48,0.18)', overflow: 'hidden', minWidth: 150 }}>
+              <div style={{ padding: '6px 10px', fontSize: 10, fontFamily: 'Roboto Mono', color: 'var(--accent)', borderBottom: '1px solid var(--border)' }}>
+                ▣ {s?.name ?? 'Stock'} {s && <span style={{ color: s.state === 'FULL' ? '#16a34a' : 'var(--text-muted)' }}>· {s.state}</span>}
+              </div>
+              <button onClick={() => { setStorageState(storageMenu.id, 'FULL').catch(() => {}); setStorageMenu(null) }}
+                style={menuItem('#16a34a')}>● FULL</button>
+              <button onClick={() => { setStorageState(storageMenu.id, 'EMPTY').catch(() => {}); setStorageMenu(null) }}
+                style={menuItem('var(--text-muted)')}>○ EMPTY</button>
             </div>
           </div>
         )

@@ -22,6 +22,9 @@ import type { MissionAction } from '@/types/fleet'
 // TO_CHARGE: a PARK-homed bot driving to the nearest CHARGE dock when low.
 type Phase = 'PARKED' | 'TO_PICKUP' | 'AT_PICKUP' | 'TO_DROPOFF' | 'AT_DROPOFF' | 'TO_HOME' | 'TO_CHARGE'
 
+// Operator commands from the robot detail panel.
+export type SimCommand = 'PAUSE' | 'RESUME' | 'CANCEL' | 'PARK' | 'CHARGE' | 'LEAVE' | 'RETURN'
+
 interface SimBot {
   id: string
   model: AgvModel
@@ -43,6 +46,7 @@ interface SimBot {
   battery: number
   status: AgvStatus
   paused: boolean
+  left: boolean            // operator pulled it off the map (deadlock relief) until RETURN
   fault: { until: number; error: VDA5050Error } | null
   lowBatt: boolean
   yielding: boolean
@@ -324,7 +328,7 @@ export class SimulationService {
         pickupNode: '', dropoffNode: '', pickupStorageId: null, dropoffStorageId: null,
         actions: [], dwellUntil: 0,
         battery: 70 + Math.random() * 30, status: 'IDLE',
-        paused: false, fault: null, lowBatt: false, yielding: false, waitTicks: 0, jamAlarmed: false,
+        paused: false, left: false, fault: null, lowBatt: false, yielding: false, waitTicks: 0, jamAlarmed: false,
         pos: { x: home.x, y: home.y }, theta: this.parkHeading(home.id), lastLog: 0,
       }
       this.reserved.set(home.id, bot.id)   // parked bots hold their node
@@ -351,17 +355,60 @@ export class SimulationService {
     useFleetStore.getState().setMqttConnected(false)
   }
 
-  command(robotId: string, action: 'PAUSE' | 'RESUME' | 'CANCEL') {
+  command(robotId: string, action: SimCommand) {
     const b = this.bots.find(x => x.id === robotId)
     if (!b) return
-    if (action === 'PAUSE')  { b.paused = true;  b.status = 'PAUSE' }
-    if (action === 'RESUME') { b.paused = false; b.status = b.edge ? 'EXECUTING' : 'IDLE' }
-    if (action === 'CANCEL') {
-      b.paused = false
-      if (b.missionId) { useFleetStore.getState().cancelMission(b.missionId); b.missionId = null }
-      useFleetStore.getState().setRobotCarrying(b.id, false)
-      this.sendHome(b)
+    const store = useFleetStore.getState()
+    switch (action) {
+      case 'PAUSE':  b.paused = true;  b.status = 'PAUSE'; break
+      case 'RESUME': b.paused = false; b.left = false; b.status = b.edge ? 'EXECUTING' : 'IDLE'; break
+      case 'CANCEL':
+        b.paused = false
+        if (b.missionId) { store.cancelMission(b.missionId); b.missionId = null }
+        store.setRobotCarrying(b.id, false)
+        this.sendHome(b)
+        break
+      case 'PARK':            // drop the job back in the queue and return to the park dock
+        b.paused = false; b.left = false
+        this.requeueMission(store, b)
+        this.sendHome(b)
+        break
+      case 'CHARGE': {        // requeue the job and drive to the nearest charge dock
+        b.paused = false; b.left = false
+        this.requeueMission(store, b)
+        this.releaseReservationsExcept(b, new Set([b.node]))
+        const cn = this.nearestChargeNode(b.node)
+        const path = cn ? this.shortestPath(b.node, cn) : null
+        if (path && path.length) { b.route = path; b.edge = path[0]; b.t = 0; b.phase = 'TO_CHARGE'; b.status = 'EXECUTING' }
+        else { b.route = []; b.edge = null; b.phase = 'PARKED'; b.status = 'CHARGING' }   // already on a charge node
+        break
+      }
+      case 'LEAVE':           // pull off the map: free ALL nodes so another AGV can pass a real deadlock
+        b.paused = false
+        this.requeueMission(store, b)
+        this.releaseReservationsExcept(b, new Set())
+        b.left = true; b.edge = null; b.route = []; b.phase = 'PARKED'; b.status = 'UNAVAILABLE'
+        break
+      case 'RETURN': {        // bring it back onto the map at its home dock (if free)
+        b.left = false
+        const home = this.nodes.get(b.homeNode)
+        const owner = home ? this.reserved.get(home.id) : undefined
+        if (home && (owner === undefined || owner === b.id)) {
+          b.node = home.id; b.pos = { x: home.x, y: home.y }; b.theta = this.parkHeading(home.id)
+          this.reserved.set(home.id, b.id)
+        }
+        b.edge = null; b.route = []; b.phase = 'PARKED'; b.status = 'IDLE'
+        break
+      }
     }
+  }
+
+  // Put a bot's in-flight mission back on the queue (re-dispatchable) and clear
+  // its carry/station state — used by PARK / CHARGE / LEAVE so the job isn't lost.
+  private requeueMission(store: ReturnType<typeof useFleetStore.getState>, b: SimBot) {
+    if (b.missionId) { store.updateMission(b.missionId, { status: 'PENDING', agvId: null, progress: 0 }); b.missionId = null }
+    b.pickupStorageId = null; b.dropoffStorageId = null; b.actions = []
+    store.setRobotCarrying(b.id, false)
   }
 
   // ── dispatch: nearest free bot by route to the PICKUP node ──
@@ -556,6 +603,10 @@ export class SimulationService {
       if (!b.fault && !b.paused && b.status === 'EXECUTING' && Math.random() < FAULT_CHANCE) this.raiseFault(store, b, now)
 
       if (b.paused || b.fault) { this.report(store, b, now); continue }
+
+      // pulled off the map (deadlock relief): hold ALL nodes free so others pass,
+      // sit out until the operator hits RETURN
+      if (b.left) { this.releaseReservationsExcept(b, new Set()); b.status = 'UNAVAILABLE'; this.report(store, b, now); continue }
 
       // parked: charge only on a CHARGE node; a PARK-homed bot that runs low
       // drives to the nearest charge node, tops up, then returns home.

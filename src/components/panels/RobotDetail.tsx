@@ -3,10 +3,12 @@ import { STATUS_COLOR, STATUS_LABEL, AGV_ASSET_PATH } from '@/constants'
 import { AGV_SPECS } from '@/constants/agv-specs'
 import { colorOf } from '@/constants/fleet-roster'
 
+export type RobotAction = 'PAUSE' | 'RESUME' | 'CANCEL' | 'PARK' | 'CHARGE' | 'VIEW' | 'LEAVE' | 'RETURN'
+
 interface Props {
   robot: Robot
   onClose: () => void
-  onAction: (action: 'PAUSE' | 'RESUME' | 'CANCEL') => void
+  onAction: (action: RobotAction) => void
 }
 
 const Field = ({ label, value, color }: { label: string; value: string; color?: string }) => (
@@ -23,6 +25,7 @@ export function RobotDetail({ robot: r, onClose, onAction }: Props) {
   const batCol = r.battery.batteryCharge > 50 ? '#16a34a' : r.battery.batteryCharge > 20 ? '#f59e0b' : '#dc2626'
   const speed  = Math.hypot(r.velocity.vx, r.velocity.vy)
   const isPaused = r.status === 'PAUSE'
+  const isAway   = r.status === 'UNAVAILABLE'   // pulled off the map via LEAVE
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden', flex: 1 }}>
@@ -92,9 +95,16 @@ export function RobotDetail({ robot: r, onClose, onAction }: Props) {
       </div>
 
       {/* Quick actions */}
-      <div style={{ display: 'flex', gap: 6, padding: '8px 12px', borderTop: '1px solid var(--border)' }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, padding: '8px 12px', borderTop: '1px solid var(--border)' }}>
         <ActionBtn label={isPaused ? 'Resume' : 'Pause'} color={isPaused ? '#16a34a' : '#f59e0b'}
           onClick={() => onAction(isPaused ? 'RESUME' : 'PAUSE')} />
+        <ActionBtn label="Park"   color="#2563eb" onClick={() => onAction('PARK')} />
+        <ActionBtn label="Charge" color="#ea7a00" onClick={() => onAction('CHARGE')} />
+        <ActionBtn label="View"   color="#0891b2" onClick={() => onAction('VIEW')} title="Center the map on this robot" />
+        {/* Leave: pull off the map to clear a real traffic deadlock; Return to bring it back */}
+        <ActionBtn label={isAway ? 'Return' : 'Leave'} color={isAway ? '#16a34a' : '#7c3aed'}
+          onClick={() => onAction(isAway ? 'RETURN' : 'LEAVE')}
+          title={isAway ? 'Bring the robot back onto the map' : 'Temporarily remove from the map so another AGV can pass a deadlock'} />
         <ActionBtn label="Cancel" color="#dc2626" onClick={() => onAction('CANCEL')} />
       </div>
     </div>
@@ -105,9 +115,9 @@ const SectionTitle = ({ children }: { children: React.ReactNode }) => (
   <div style={{ fontSize: 9, letterSpacing: 2, color: 'var(--text-muted)', textTransform: 'uppercase', margin: '10px 0 4px' }}>{children}</div>
 )
 
-const ActionBtn = ({ label, color, onClick }: { label: string; color: string; onClick: () => void }) => (
-  <button onClick={onClick}
-    style={{ flex: 1, padding: '5px 0', fontSize: 10, borderRadius: 2, cursor: 'pointer', fontFamily: 'Inter, "Noto Sans JP", sans-serif', fontWeight: 600, letterSpacing: 1,
+const ActionBtn = ({ label, color, onClick, title }: { label: string; color: string; onClick: () => void; title?: string }) => (
+  <button onClick={onClick} title={title}
+    style={{ flex: '1 1 28%', minWidth: 56, padding: '5px 0', fontSize: 10, borderRadius: 2, cursor: 'pointer', fontFamily: 'Inter, "Noto Sans JP", sans-serif', fontWeight: 600, letterSpacing: 0.5,
       color, border: `1px solid ${color}55`, background: color + '10' }}>
     {label}
   </button>

@@ -9,6 +9,7 @@ import type { Mission, Storage, StorageArea } from '@/types/fleet'
 import { useFleetStore } from '@/store/fleet.store'
 import { useStorageStore } from '@/store/storage.store'
 import { useConfigStore } from '@/store/config.store'
+import { useAuthStore } from '@/store/auth.store'
 import { api, ApiError } from '@/services/api'
 import { mqttService } from '@/services/mqtt.service'
 import { buildVda5050Order } from '@/services/order.service'
@@ -22,7 +23,16 @@ const STATUS_COLOR: Record<Mission['status'], string> = {
   CANCELLED: '#b45309',
 }
 
-export function OrderPanel({ onManageStorage }: { onManageStorage?: () => void }) {
+export type JobPick = 'pickup' | 'dropoff' | 'pickArea' | 'dropArea'
+export interface JobSel { pickup?: string; dropoff?: string; pickArea?: string; dropArea?: string }
+
+export function OrderPanel({ onManageStorage, sel, setSel, pickMode, onRequestPick }: {
+  onManageStorage?: () => void
+  sel: JobSel
+  setSel: (updater: (s: JobSel) => JobSel) => void
+  pickMode: JobPick | null
+  onRequestPick: (m: JobPick | null) => void
+}) {
   const missions    = useFleetStore(s => s.missions)
   const addMission  = useFleetStore(s => s.addMission)
   const cancelMission = useFleetStore(s => s.cancelMission)
@@ -44,19 +54,30 @@ export function OrderPanel({ onManageStorage }: { onManageStorage?: () => void }
   const dropAreas = areas.filter(a => a.enabled && (a.kind === 'DROP' || a.kind === 'BOTH') && countIn(a.id, dropoffs) > 0)
 
   const [mode, setMode] = useState<'single' | 'batch'>('single')
-  const [from, setFrom] = useState('')
-  const [to, setTo]     = useState('')
-  const [pArea, setPArea] = useState('')
-  const [dArea, setDArea] = useState('')
   const [priority, setPriority] = useState(5)
   const [busy, setBusy] = useState(false)
   const [err, setErr]   = useState('')
 
-  const pickId = from || pickups[0]?.id || ''
-  const dropId = to   || dropoffs[0]?.id || ''
-  const pAreaId = pArea || pickAreas[0]?.id || ''
-  const dAreaId = dArea || dropAreas[0]?.id || ''
-  const canCreate = !busy && (mode === 'single'
+  const role = useAuthStore(s => s.user?.role)
+  const canCommand = role !== 'VIEWER'   // VIEWER is read-only (server enforces too)
+
+  // selections live in App so a map click can set them; a picked id that isn't in
+  // the default valid set is still shown (prepended) so the dropdown stays in sync.
+  const setField = (k: JobPick, v: string) => setSel(s => ({ ...s, [k]: v }))
+  const withSel = (opts: Storage[], id?: string) =>
+    id && !opts.some(o => o.id === id) ? [storages.find(s => s.id === id), ...opts].filter(Boolean) as Storage[] : opts
+  const withSelArea = (opts: StorageArea[], id?: string) =>
+    id && !opts.some(o => o.id === id) ? [areas.find(a => a.id === id), ...opts].filter(Boolean) as StorageArea[] : opts
+
+  const pickOpts  = withSel(pickups, sel.pickup)
+  const dropOpts  = withSel(dropoffs, sel.dropoff)
+  const pAreaOpts = withSelArea(pickAreas, sel.pickArea)
+  const dAreaOpts = withSelArea(dropAreas, sel.dropArea)
+  const pickId  = sel.pickup   || pickups[0]?.id   || ''
+  const dropId  = sel.dropoff  || dropoffs[0]?.id  || ''
+  const pAreaId = sel.pickArea || pickAreas[0]?.id || ''
+  const dAreaId = sel.dropArea || dropAreas[0]?.id || ''
+  const canCreate = !busy && canCommand && (mode === 'single'
     ? (!!pickId && !!dropId && pickId !== dropId)
     : (!!pAreaId && !!dAreaId))
 
@@ -73,7 +94,7 @@ export function OrderPanel({ onManageStorage }: { onManageStorage?: () => void }
             if (target) mqttService.sendOrder(target.serial, buildVda5050Order(target.serial, broker.manufacturer, m, map))
           }
         }
-        setPArea(''); setDArea('')
+        setSel(s => ({ ...s, pickArea: undefined, dropArea: undefined })); onRequestPick(null)
       } else {
         const m = await api.createMission({ pickupStorageId: pickId, dropoffStorageId: dropId, priority })
         addMission(m)
@@ -82,7 +103,7 @@ export function OrderPanel({ onManageStorage }: { onManageStorage?: () => void }
           const target = amrs.find(a => a.enabled)
           if (target) mqttService.sendOrder(target.serial, buildVda5050Order(target.serial, broker.manufacturer, m, map))
         }
-        setFrom(''); setTo('')
+        setSel(s => ({ ...s, pickup: undefined, dropoff: undefined })); onRequestPick(null)
       }
     } catch (e) {
       setErr(e instanceof ApiError ? e.message : 'failed to create mission')
@@ -106,7 +127,7 @@ export function OrderPanel({ onManageStorage }: { onManageStorage?: () => void }
       </div>
 
       {/* Create form */}
-      <div style={{ padding: '0 12px 8px', borderBottom: '1px solid var(--border)', display: 'grid', gap: 5 }}>
+      <div style={{ padding: '0 12px 8px', borderBottom: '1px solid var(--border)', display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 5 }}>
         {/* mode toggle: single storage vs batch (area) */}
         <div style={{ display: 'flex', gap: 4 }}>
           {(['single', 'batch'] as const).map(m => (
@@ -120,16 +141,23 @@ export function OrderPanel({ onManageStorage }: { onManageStorage?: () => void }
         </div>
         {mode === 'single' ? (
           <>
-            <StorageSelect label="Pickup"  value={pickId} options={pickups}  onChange={setFrom} empty="No FULL pickup storage" />
-            <StorageSelect label="Dropoff" value={dropId} options={dropoffs} onChange={setTo}   empty="No EMPTY dropoff storage" />
+            <StorageSelect label="Pickup"  value={pickId} options={pickOpts}  onChange={v => setField('pickup', v)} empty="No FULL pickup storage"
+              picking={pickMode === 'pickup'}  onPick={() => onRequestPick(pickMode === 'pickup' ? null : 'pickup')} />
+            <StorageSelect label="Dropoff" value={dropId} options={dropOpts} onChange={v => setField('dropoff', v)} empty="No EMPTY dropoff storage"
+              picking={pickMode === 'dropoff'} onPick={() => onRequestPick(pickMode === 'dropoff' ? null : 'dropoff')} />
+            {pickMode && <div style={{ fontSize: 8, color: '#7c3aed' }}>Click the {pickMode === 'pickup' ? 'pickup' : 'dropoff'} stock on the map…</div>}
           </>
         ) : (
           <>
-            <AreaSelect label="Pick area" value={pAreaId} options={pickAreas} counts={a => countIn(a, pickups)} onChange={setPArea} empty="No area with FULL pickups" />
-            <AreaSelect label="Drop area" value={dAreaId} options={dropAreas} counts={a => countIn(a, dropoffs)} onChange={setDArea} empty="No area with EMPTY dropoffs" />
-            <div style={{ fontSize: 8, color: 'var(--text-faint)' }}>
-              Creates {Math.min(countIn(pAreaId, pickups), countIn(dAreaId, dropoffs)) || 0} mission(s) — FULL pickups paired with EMPTY dropoffs.
-            </div>
+            <AreaSelect label="Pick area" value={pAreaId} options={pAreaOpts} counts={a => countIn(a, pickups)} onChange={v => setField('pickArea', v)} empty="No area with FULL pickups"
+              picking={pickMode === 'pickArea'} onPick={() => onRequestPick(pickMode === 'pickArea' ? null : 'pickArea')} />
+            <AreaSelect label="Drop area" value={dAreaId} options={dAreaOpts} counts={a => countIn(a, dropoffs)} onChange={v => setField('dropArea', v)} empty="No area with EMPTY dropoffs"
+              picking={pickMode === 'dropArea'} onPick={() => onRequestPick(pickMode === 'dropArea' ? null : 'dropArea')} />
+            {pickMode ? <div style={{ fontSize: 8, color: '#7c3aed' }}>Click the {pickMode === 'pickArea' ? 'pick' : 'drop'} area on the map…</div> : (
+              <div style={{ fontSize: 8, color: 'var(--text-faint)' }}>
+                Creates {Math.min(countIn(pAreaId, pickups), countIn(dAreaId, dropoffs)) || 0} mission(s) — FULL pickups paired with EMPTY dropoffs.
+              </div>
+            )}
           </>
         )}
         <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
@@ -145,6 +173,7 @@ export function OrderPanel({ onManageStorage }: { onManageStorage?: () => void }
           {busy ? '… CREATING' : mode === 'batch' ? '+ CREATE BATCH' : '+ CREATE MISSION'}
         </button>
         {err && <div style={{ fontSize: 9, color: '#dc2626' }}>{err}</div>}
+        {!canCommand && <div style={{ fontSize: 9, color: 'var(--text-faint)' }}>Your role (VIEWER) is read-only — ask an OPERATOR or ADMIN to issue commands.</div>}
         {!storages.length && <div style={{ fontSize: 9, color: 'var(--text-faint)' }}>No storages yet — add some in the STORAGE tab.</div>}
       </div>
 
@@ -205,38 +234,50 @@ export function OrderPanel({ onManageStorage }: { onManageStorage?: () => void }
   )
 }
 
-function AreaSelect({ label, value, options, counts, onChange, empty }:
-  { label: string; value: string; options: StorageArea[]; counts: (areaId: string) => number; onChange: (v: string) => void; empty: string }) {
+// 📍 pin button to enter "click on the map" mode for this field
+function PinBtn({ active, onClick }: { active: boolean; onClick: () => void }) {
+  return (
+    <button onClick={onClick} title={active ? 'Cancel map pick' : 'Pick on the map'}
+      style={{ flexShrink: 0, width: 24, fontSize: 11, lineHeight: 1, padding: '3px 0', borderRadius: 2, cursor: 'pointer',
+        color: active ? '#fff' : '#7c3aed', border: `1px solid ${active ? '#7c3aed' : 'rgba(124,58,237,0.4)'}`,
+        background: active ? '#7c3aed' : 'rgba(124,58,237,0.08)' }}>📍</button>
+  )
+}
+
+function AreaSelect({ label, value, options, counts, onChange, empty, onPick, picking }:
+  { label: string; value: string; options: StorageArea[]; counts: (areaId: string) => number; onChange: (v: string) => void; empty: string; onPick?: () => void; picking?: boolean }) {
   return (
     <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
       <span style={{ fontSize: 9, color: 'var(--text-muted)', width: 42 }}>{label}</span>
       {options.length ? (
         <select value={value} onChange={e => onChange(e.target.value)}
-          style={{ flex: 1, fontSize: 10, fontFamily: 'Roboto Mono', background: 'var(--surface-2)', color: 'var(--text)',
+          style={{ flex: 1, minWidth: 0, fontSize: 10, fontFamily: 'Roboto Mono', background: 'var(--surface-2)', color: 'var(--text)',
             border: '1px solid var(--border)', borderRadius: 2, padding: '3px 4px' }}>
           {options.map(a => <option key={a.id} value={a.id}>{a.name} ({counts(a.id)})</option>)}
         </select>
       ) : (
         <span style={{ flex: 1, fontSize: 9, color: 'var(--text-faint)', fontStyle: 'italic' }}>{empty}</span>
       )}
+      {onPick && <PinBtn active={!!picking} onClick={onPick} />}
     </div>
   )
 }
 
-function StorageSelect({ label, value, options, onChange, empty }:
-  { label: string; value: string; options: Storage[]; onChange: (v: string) => void; empty: string }) {
+function StorageSelect({ label, value, options, onChange, empty, onPick, picking }:
+  { label: string; value: string; options: Storage[]; onChange: (v: string) => void; empty: string; onPick?: () => void; picking?: boolean }) {
   return (
     <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
       <span style={{ fontSize: 9, color: 'var(--text-muted)', width: 42 }}>{label}</span>
       {options.length ? (
         <select value={value} onChange={e => onChange(e.target.value)}
-          style={{ flex: 1, fontSize: 10, fontFamily: 'Roboto Mono', background: 'var(--surface-2)', color: 'var(--text)',
+          style={{ flex: 1, minWidth: 0, fontSize: 10, fontFamily: 'Roboto Mono', background: 'var(--surface-2)', color: 'var(--text)',
             border: '1px solid var(--border)', borderRadius: 2, padding: '3px 4px' }}>
-          {options.map(s => <option key={s.id} value={s.id}>{s.name} @ {s.nodeId}</option>)}
+          {options.map(s => <option key={s.id} value={s.id}>{s.name} @ {s.nodeId}{s.state === 'FULL' ? ' ●' : ''}</option>)}
         </select>
       ) : (
         <span style={{ flex: 1, fontSize: 9, color: 'var(--text-faint)', fontStyle: 'italic' }}>{empty}</span>
       )}
+      {onPick && <PinBtn active={!!picking} onClick={onPick} />}
     </div>
   )
 }

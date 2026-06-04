@@ -29,4 +29,14 @@ function requireAuth(req, res, next) {
   }
 }
 
-module.exports = { signToken, requireAuth }
+// Express middleware factory: require the authed user to hold one of `roles`.
+// Use AFTER requireAuth. ADMIN passes every check (superuser).
+function requireRole(...roles) {
+  return (req, res, next) => {
+    const role = req.user && req.user.role
+    if (role === 'ADMIN' || roles.includes(role)) return next()
+    return res.status(403).json({ error: 'insufficient role' })
+  }
+}
+
+module.exports = { signToken, requireAuth, requireRole }

@@ -26,6 +26,11 @@ interface Props {
   onSelectNodes?: (ids: string[]) => void
   // right-click a storage area on the map → context menu (batch FULL/EMPTY)
   onAreaContextMenu?: (areaId: string, clientX: number, clientY: number) => void
+  // right-click a single storage crate → context menu (toggle FULL/EMPTY)
+  onStorageContextMenu?: (storageId: string, clientX: number, clientY: number) => void
+  // job pick-on-map: left-click selects a storage (pickup/dropoff) or area (pickArea/dropArea)
+  pickMode?: 'pickup' | 'dropoff' | 'pickArea' | 'dropArea' | null
+  onMapPick?: (mode: 'pickup' | 'dropoff' | 'pickArea' | 'dropArea', id: string | null) => void
 }
 
 const EMPTY_SET: Set<string> = new Set()
@@ -53,7 +58,7 @@ function getCachedImg(src: string): HTMLImageElement {
   return imgCache.get(src)!
 }
 
-export function MapCanvas({ map, robots, config, selectedRobotId, onRobotClick, onHover, ctrl, selectMode, onSelectNodes, onAreaContextMenu }: Props) {
+export function MapCanvas({ map, robots, config, selectedRobotId, onRobotClick, onHover, ctrl, selectMode, onSelectNodes, onAreaContextMenu, onStorageContextMenu, pickMode, onMapPick }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const animRef   = useRef<number>()
   // rubber-band selection rectangle (screen px), drawn each frame via a ref
@@ -263,6 +268,43 @@ export function MapCanvas({ map, robots, config, selectedRobotId, onRobotClick, 
   const handleClick = useCallback((e: React.MouseEvent) => {
     if (movedRef.current || selectModeRef.current) return
     const { x: mx, y: my } = pos(e)
+
+    // job pick-on-map: select a storage (pickup/dropoff) or area (pickArea/dropArea)
+    if (pickMode && onMapPick) {
+      const tt = tRef.current
+      if (pickMode === 'pickup' || pickMode === 'dropoff') {
+        // pick the NEAREST stock within a generous radius (clicking the node/crate
+        // is forgiving) instead of an exact crate-footprint hit
+        const radius = Math.max(20, Math.max(14, STORAGE_M * tt.scale) / 2 + 8)
+        let best: { id: string; d: number } | null = null
+        for (const s of storagesRef.current) {
+          if (!s.enabled) continue
+          const node = map.points.find(p => p.id === s.nodeId)
+          if (!node) continue
+          const { sx, sy } = worldToScreen(node.x, node.y, tt)
+          const d = Math.hypot(mx - sx, my - sy)
+          if (d <= radius && (!best || d < best.d)) best = { id: s.id, d }
+        }
+        if (best) { onMapPick(pickMode, best.id); return }
+      } else {
+        const pad = 2.0
+        let hit: string | null = null
+        for (const a of areasRef.current) {
+          if (!a.enabled) continue
+          const pts = storagesRef.current.filter(s => s.areaId === a.id && s.enabled)
+            .map(s => map.points.find(p => p.id === s.nodeId)).filter((p): p is MapPoint => !!p)
+          if (!pts.length) continue
+          const xs = pts.map(p => p.x), ys = pts.map(p => p.y)
+          const tl = worldToScreen(Math.min(...xs) - pad, Math.max(...ys) + pad, tt)
+          const br = worldToScreen(Math.max(...xs) + pad, Math.min(...ys) - pad, tt)
+          if (mx >= tl.sx && mx <= br.sx && my >= tl.sy && my <= br.sy) hit = a.id
+        }
+        if (hit) { onMapPick(pickMode, hit); return }
+      }
+      onMapPick(pickMode, null)   // clicked empty → cancel
+      return
+    }
+
     const hitR = Math.max(14, config.robotSize * 0.6)
     for (const r of robots) {
       const { sx, sy } = worldToScreen(r.pose.x, r.pose.y, tRef.current)
@@ -281,13 +323,31 @@ export function MapCanvas({ map, robots, config, selectedRobotId, onRobotClick, 
     }
     if (best) { setSelectedNode(prev => prev?.id === best!.id ? null : best); onRobotClick(null); return }
     onRobotClick(null); setSelectedNode(null)
-  }, [robots, map, config.robotSize, selectedRobotId, onRobotClick])
+  }, [robots, map, config.robotSize, selectedRobotId, onRobotClick, pickMode, onMapPick])
 
-  // right-click → if the cursor is inside a storage area's box, open its menu
+  // right-click → a single storage crate (toggle), else a storage area's box (batch)
   const onContextMenu = useCallback((e: React.MouseEvent) => {
-    if (!onAreaContextMenu) return
+    if (!onAreaContextMenu && !onStorageContextMenu) return
     const { x: mx, y: my } = pos(e)
     const tt = tRef.current
+
+    // 1) individual storage crate (more specific — also catches ungrouped stock)
+    if (onStorageContextMenu && config.showStorage) {
+      const half = Math.max(14, STORAGE_M * tt.scale) / 2
+      for (let i = storagesRef.current.length - 1; i >= 0; i--) {   // topmost first
+        const s = storagesRef.current[i]
+        if (!s.enabled) continue
+        const node = map.points.find(p => p.id === s.nodeId)
+        if (!node) continue
+        const { sx, sy } = worldToScreen(node.x, node.y, tt)
+        if (Math.abs(mx - sx) <= half && Math.abs(my - sy) <= half) {
+          e.preventDefault(); onStorageContextMenu(s.id, e.clientX, e.clientY); return
+        }
+      }
+    }
+
+    // 2) storage area box (batch FULL/EMPTY)
+    if (!onAreaContextMenu) return
     const pad = 2.0
     let hit: string | null = null
     for (const a of areasRef.current) {
@@ -303,7 +363,7 @@ export function MapCanvas({ map, robots, config, selectedRobotId, onRobotClick, 
       if (mx >= tl.sx && mx <= br.sx && my >= tl.sy && my <= br.sy) hit = a.id  // topmost wins
     }
     if (hit) { e.preventDefault(); onAreaContextMenu(hit, e.clientX, e.clientY) }
-  }, [map, onAreaContextMenu])
+  }, [map, onAreaContextMenu, onStorageContextMenu, config.showStorage])
 
   const np = selectedNode ? worldToScreen(selectedNode.x, selectedNode.y, t) : null
 
@@ -311,7 +371,7 @@ export function MapCanvas({ map, robots, config, selectedRobotId, onRobotClick, 
     <div style={{ position: 'relative', width: '100%', height: '100%' }}>
       <canvas
         ref={canvasRef}
-        style={{ width: '100%', height: '100%', display: 'block', cursor: selectMode ? 'crosshair' : 'grab' }}
+        style={{ width: '100%', height: '100%', display: 'block', cursor: (selectMode || pickMode) ? 'crosshair' : 'grab' }}
         onClick={handleClick}
         onMouseDown={onMouseDown}
         onMouseMove={onMouseMove}
@@ -654,6 +714,13 @@ function drawEdges(ctx: CanvasRenderingContext2D, map: FleetMap, t: Transform, c
   const tc = getCanvas()
   const EDGE = tc.edge          // soft steel-blue lane (theme-aware)
   const ARROW = tc.edgeArrow    // a darker shade of the lane, in-family
+  // A lane is bidirectional when a reverse-twin curve exists (eNode→sNode).
+  // For those we draw ONE double-headed arrow (↔) instead of two single heads
+  // overlapping and pointing opposite ways at the midpoint; one-way lanes keep
+  // their single travel arrow.
+  const dirSet = new Set(map.curves.map(c => `${c.sNode}>${c.eNode}`))
+  const pairKey = (a: string, b: string) => (a < b ? `${a}|${b}` : `${b}|${a}`)
+  const arrowDrawn = new Set<string>()
   // round caps + joins keep bezier lanes smooth and modern (no harsh corners)
   ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.setLineDash([])
   for (const c of map.curves) {
@@ -673,13 +740,26 @@ function drawEdges(ctx: CanvasRenderingContext2D, map: FleetMap, t: Transform, c
     }
     ctx.stroke()
 
-    // direction arrow at the edge midpoint (travel is always sNode→eNode);
-    // size scales with zoom like the nodes/labels (hidden in far overview)
+    // direction arrow(s) at the edge midpoint; size scales with zoom (hidden
+    // in far overview). One-way → single head pointing sNode→eNode.
     if (t.scale >= 2.5) {
-      const wm = curveWorld(c, 0.5), wn = curveWorld(c, 0.54)
-      const m = worldToScreen(wm.x, wm.y, t), n = worldToScreen(wn.x, wn.y, t)
-      const ang = Math.atan2(n.sy - m.sy, n.sx - m.sx)
-      drawArrowhead(ctx, m.sx, m.sy, ang, Math.max(2, Math.min(7, t.scale * 0.42)), ARROW)
+      const headSz = Math.max(2, Math.min(7, t.scale * 0.42))
+      const arrowAt = (head: number, tan: number) => {
+        const h = curveWorld(c, head), a = curveWorld(c, tan)
+        const ph = worldToScreen(h.x, h.y, t), pa = worldToScreen(a.x, a.y, t)
+        drawArrowhead(ctx, ph.sx, ph.sy, Math.atan2(ph.sy - pa.sy, ph.sx - pa.sx), headSz, ARROW)
+      }
+      if (dirSet.has(`${c.eNode}>${c.sNode}`)) {
+        // bidirectional: draw the ↔ once per node-pair (two heads pointing apart)
+        const k = pairKey(c.sNode, c.eNode)
+        if (!arrowDrawn.has(k)) {
+          arrowDrawn.add(k)
+          arrowAt(0.58, 0.54)   // head toward eNode
+          arrowAt(0.42, 0.46)   // head toward sNode
+        }
+      } else {
+        arrowAt(0.54, 0.5)      // one-way: single travel head
+      }
     }
   }
   ctx.lineCap = 'butt'; ctx.lineJoin = 'miter'; ctx.setLineDash([])

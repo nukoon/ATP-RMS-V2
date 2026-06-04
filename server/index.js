@@ -17,7 +17,7 @@ const express = require('express')
 const cors = require('cors')
 const bcrypt = require('bcryptjs')
 const pool = require('./db')
-const { signToken, requireAuth } = require('./auth')
+const { signToken, requireAuth, requireRole } = require('./auth')
 
 const app = express()
 app.use(cors())
@@ -64,8 +64,80 @@ app.get('/api/auth/me', requireAuth, wrap(async (req, res) => {
 }))
 
 function publicUser(u) {
-  return { id: String(u.id), username: u.username, realName: u.real_name, role: u.role, enabled: !!u.enabled }
+  return {
+    id: String(u.id), username: u.username, realName: u.real_name, role: u.role,
+    enabled: !!u.enabled, lastLogin: u.last_login || null,
+  }
 }
+
+// ── User management (ADMIN only) ──────────────────────────
+const ROLES = ['ADMIN', 'OPERATOR', 'VIEWER']
+
+app.get('/api/users', requireAuth, requireRole('ADMIN'), wrap(async (_req, res) => {
+  const [rows] = await pool.query(
+    'SELECT id, username, real_name, role, enabled, last_login FROM sys_user ORDER BY username',
+  )
+  res.json(rows.map(publicUser))
+}))
+
+app.post('/api/users', requireAuth, requireRole('ADMIN'), wrap(async (req, res) => {
+  const { username, password, realName, role, enabled } = req.body || {}
+  if (!username || !password) return res.status(400).json({ error: 'username and password required' })
+  if (role && !ROLES.includes(role)) return res.status(400).json({ error: `role must be one of ${ROLES.join('/')}` })
+  const [exists] = await pool.query('SELECT id FROM sys_user WHERE username = ? LIMIT 1', [username])
+  if (exists[0]) return res.status(409).json({ error: 'username already exists' })
+  const hash = bcrypt.hashSync(password, 10)
+  const [r] = await pool.query(
+    'INSERT INTO sys_user (username, password, real_name, role, enabled) VALUES (?, ?, ?, ?, ?)',
+    [username, hash, realName || username, role || 'VIEWER', enabled === false ? 0 : 1],
+  )
+  const [rows] = await pool.query('SELECT id, username, real_name, role, enabled, last_login FROM sys_user WHERE id = ?', [r.insertId])
+  res.status(201).json(publicUser(rows[0]))
+}))
+
+app.patch('/api/users/:id', requireAuth, requireRole('ADMIN'), wrap(async (req, res) => {
+  const id = req.params.id
+  const { username, password, realName, role, enabled } = req.body || {}
+  if (role !== undefined && !ROLES.includes(role)) return res.status(400).json({ error: `role must be one of ${ROLES.join('/')}` })
+
+  // guard: don't let the last enabled ADMIN demote/disable themselves into lockout
+  if (role !== undefined || enabled !== undefined) {
+    const [cur] = await pool.query('SELECT role, enabled FROM sys_user WHERE id = ? LIMIT 1', [id])
+    if (cur[0] && cur[0].role === 'ADMIN' && cur[0].enabled) {
+      const losingAdmin = (role !== undefined && role !== 'ADMIN') || enabled === false
+      if (losingAdmin) {
+        const [[{ n }]] = await pool.query("SELECT COUNT(*) AS n FROM sys_user WHERE role = 'ADMIN' AND enabled = 1")
+        if (n <= 1) return res.status(400).json({ error: 'cannot remove the last active admin' })
+      }
+    }
+  }
+
+  const sets = [], vals = []
+  if (username !== undefined) { sets.push('username = ?');  vals.push(username) }
+  if (realName !== undefined) { sets.push('real_name = ?'); vals.push(realName || null) }
+  if (role !== undefined)     { sets.push('role = ?');      vals.push(role) }
+  if (enabled !== undefined)  { sets.push('enabled = ?');   vals.push(enabled ? 1 : 0) }
+  if (password)               { sets.push('password = ?');  vals.push(bcrypt.hashSync(password, 10)) }
+  if (!sets.length) return res.status(400).json({ error: 'nothing to update' })
+  vals.push(id)
+  const [r] = await pool.query(`UPDATE sys_user SET ${sets.join(', ')} WHERE id = ?`, vals)
+  if (!r.affectedRows) return res.status(404).json({ error: 'not found' })
+  const [rows] = await pool.query('SELECT id, username, real_name, role, enabled, last_login FROM sys_user WHERE id = ?', [id])
+  res.json(publicUser(rows[0]))
+}))
+
+app.delete('/api/users/:id', requireAuth, requireRole('ADMIN'), wrap(async (req, res) => {
+  const id = req.params.id
+  if (String(id) === String(req.user.id)) return res.status(400).json({ error: 'cannot delete yourself' })
+  const [cur] = await pool.query('SELECT role, enabled FROM sys_user WHERE id = ? LIMIT 1', [id])
+  if (cur[0] && cur[0].role === 'ADMIN' && cur[0].enabled) {
+    const [[{ n }]] = await pool.query("SELECT COUNT(*) AS n FROM sys_user WHERE role = 'ADMIN' AND enabled = 1")
+    if (n <= 1) return res.status(400).json({ error: 'cannot delete the last active admin' })
+  }
+  const [r] = await pool.query('DELETE FROM sys_user WHERE id = ?', [id])
+  if (!r.affectedRows) return res.status(404).json({ error: 'not found' })
+  res.json({ ok: true })
+}))
 
 // ── AMRs (backed by the `agv` table joined to `agv_type`) ──
 const SELECT_AMR =
@@ -432,6 +504,7 @@ function rowToMission(r) {
     pickupStorageName: r.pickup_name || null,
     dropoffStorageName: r.dropoff_name || null,
     actions: asParams(r.actions),
+    createdBy: r.created_by || null,
     createdAt: r.created_at, assignedAt: r.assigned_at, startedAt: r.started_at, finishedAt: r.finished_at,
   }
 }
@@ -462,7 +535,10 @@ app.get('/api/missions', requireAuth, wrap(async (req, res) => {
   res.json(rows.map(rowToMission))
 }))
 
-app.post('/api/missions', requireAuth, wrap(async (req, res) => {
+// Who issued a command — operator display name from the JWT (real name, else username).
+const actorOf = (req) => (req.user && (req.user.realName || req.user.username)) || null
+
+app.post('/api/missions', requireAuth, requireRole('OPERATOR'), wrap(async (req, res) => {
   const { pickupStorageId, dropoffStorageId, priority } = req.body || {}
   if (!pickupStorageId || !dropoffStorageId) return res.status(400).json({ error: 'pickupStorageId and dropoffStorageId required' })
   if (pickupStorageId === dropoffStorageId) return res.status(400).json({ error: 'pickup and dropoff must differ' })
@@ -472,11 +548,11 @@ app.post('/api/missions', requireAuth, wrap(async (req, res) => {
   const dropoff = stores.find(s => String(s.id) === String(dropoffStorageId))
   if (!pickup || !dropoff) return res.status(400).json({ error: 'unknown storage' })
 
-  res.status(201).json(await insertMission(pickup, dropoff, priority))
+  res.status(201).json(await insertMission(pickup, dropoff, priority, actorOf(req)))
 }))
 
 // Insert one storage→storage transport mission, return the joined row.
-async function insertMission(pickup, dropoff, priority) {
+async function insertMission(pickup, dropoff, priority, createdBy) {
   const actions = [
     ...(await resolveStageActions(pickup.id, 'PICK')),
     ...(await resolveStageActions(dropoff.id, 'DROP')),
@@ -484,9 +560,9 @@ async function insertMission(pickup, dropoff, priority) {
   const missionNo = `MS-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 5)}`
   const [r] = await pool.query(
     `INSERT INTO mission (mission_no, type, status, priority, start_node, end_node, progress,
-        pickup_storage_id, dropoff_storage_id, actions)
-     VALUES (?, 'TRANSPORT', 'PENDING', ?, ?, ?, 0, ?, ?, ?)`,
-    [missionNo, priority || 5, pickup.node_id, dropoff.node_id, pickup.id, dropoff.id, JSON.stringify(actions)],
+        pickup_storage_id, dropoff_storage_id, actions, created_by)
+     VALUES (?, 'TRANSPORT', 'PENDING', ?, ?, ?, 0, ?, ?, ?, ?)`,
+    [missionNo, priority || 5, pickup.node_id, dropoff.node_id, pickup.id, dropoff.id, JSON.stringify(actions), createdBy || null],
   )
   const [rows] = await pool.query(`${SELECT_MISSION} WHERE m.id = ?`, [r.insertId])
   return rowToMission(rows[0])
@@ -494,7 +570,7 @@ async function insertMission(pickup, dropoff, priority) {
 
 // Batch: pair every FULL pickup storage in the pickup area with an EMPTY
 // dropoff storage in the dropoff area (zipped, min count), one mission each.
-app.post('/api/missions/batch', requireAuth, wrap(async (req, res) => {
+app.post('/api/missions/batch', requireAuth, requireRole('OPERATOR'), wrap(async (req, res) => {
   const { pickupAreaId, dropoffAreaId, priority } = req.body || {}
   if (!pickupAreaId || !dropoffAreaId) return res.status(400).json({ error: 'pickupAreaId and dropoffAreaId required' })
 
@@ -511,14 +587,15 @@ app.post('/api/missions/batch', requireAuth, wrap(async (req, res) => {
   if (!n) return res.status(400).json({ error: 'no FULL pickups / EMPTY dropoffs available in the chosen areas' })
 
   const created = []
+  const by = actorOf(req)
   for (let i = 0; i < n; i++) {
     if (String(pickups[i].id) === String(dropoffs[i].id)) continue
-    created.push(await insertMission(pickups[i], dropoffs[i], priority))
+    created.push(await insertMission(pickups[i], dropoffs[i], priority, by))
   }
   res.status(201).json(created)
 }))
 
-app.patch('/api/missions/:id', requireAuth, wrap(async (req, res) => {
+app.patch('/api/missions/:id', requireAuth, requireRole('OPERATOR'), wrap(async (req, res) => {
   const { status, progress, priority, agvId, assignedAt, startedAt, finishedAt } = req.body || {}
   const sets = [], vals = []
   if (status !== undefined)     { sets.push('status = ?');      vals.push(status) }

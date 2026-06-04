@@ -58,6 +58,15 @@ export const api = {
     }),
   me: () => request<{ user: SysUser }>('/auth/me'),
 
+  // User management (ADMIN only)
+  listUsers: () => request<SysUser[]>('/users'),
+  createUser: (u: { username: string; password: string; realName?: string; role?: SysUser['role']; enabled?: boolean }) =>
+    request<SysUser>('/users', { method: 'POST', body: JSON.stringify(u) }),
+  updateUser: (id: string, patch: Partial<{ username: string; password: string; realName: string; role: SysUser['role']; enabled: boolean }>) =>
+    request<SysUser>(`/users/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+  deleteUser: (id: string) =>
+    request<{ ok: true }>(`/users/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+
   listAmrs: () => request<AmrConfig[]>('/amrs'),
   createAmr: (a: AmrConfig) => request<AmrConfig>('/amrs', { method: 'POST', body: JSON.stringify(a) }),
   updateAmr: (serial: string, patch: Partial<AmrConfig>) =>

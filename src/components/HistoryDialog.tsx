@@ -31,6 +31,7 @@ export function HistoryDialog({ onClose }: { onClose: () => void }) {
   const [status, setStatus] = useState('')
   const [agv, setAgv] = useState('')
   const [type, setType] = useState('')
+  const [by, setBy] = useState('')      // operator who issued the command
   const [q, setQ] = useState('')
   const [from, setFrom] = useState('')   // yyyy-mm-dd
   const [to, setTo] = useState('')
@@ -46,24 +47,26 @@ export function HistoryDialog({ onClose }: { onClose: () => void }) {
 
   const agvIds = useMemo(() => [...new Set(rows.map(r => r.agvId).filter((x): x is string => !!x))].sort(), [rows])
   const types  = useMemo(() => [...new Set(rows.map(r => r.type))].sort(), [rows])
+  const byList = useMemo(() => [...new Set(rows.map(r => r.createdBy).filter((x): x is string => !!x))].sort(), [rows])
 
   const filtered = useMemo(() => rows.filter(m => {
     if (status && m.status !== status) return false
     if (agv && m.agvId !== agv) return false
     if (type && m.type !== type) return false
+    if (by && m.createdBy !== by) return false
     if (from && (!m.createdAt || m.createdAt.slice(0, 10) < from)) return false
     if (to && (!m.createdAt || m.createdAt.slice(0, 10) > to)) return false
     if (q) {
-      const hay = `${m.missionNo} ${m.pickupStorageName ?? ''} ${m.dropoffStorageName ?? ''} ${m.startNode} ${m.endNode} ${m.agvId ?? ''}`.toLowerCase()
+      const hay = `${m.missionNo} ${m.pickupStorageName ?? ''} ${m.dropoffStorageName ?? ''} ${m.startNode} ${m.endNode} ${m.agvId ?? ''} ${m.createdBy ?? ''}`.toLowerCase()
       if (!hay.includes(q.toLowerCase())) return false
     }
     return true
-  }), [rows, status, agv, type, q, from, to])
+  }), [rows, status, agv, type, by, q, from, to])
 
-  const reset = () => { setStatus(''); setAgv(''); setType(''); setQ(''); setFrom(''); setTo('') }
+  const reset = () => { setStatus(''); setAgv(''); setType(''); setBy(''); setQ(''); setFrom(''); setTo('') }
 
   const exportCsv = () => {
-    const cols = ['missionNo', 'type', 'status', 'priority', 'agvId', 'pickup', 'dropoff', 'startNode', 'endNode', 'progress', 'durationSec', 'createdAt', 'startedAt', 'finishedAt']
+    const cols = ['missionNo', 'type', 'status', 'priority', 'agvId', 'createdBy', 'pickup', 'dropoff', 'startNode', 'endNode', 'progress', 'durationSec', 'createdAt', 'startedAt', 'finishedAt']
     const esc = (v: unknown) => {
       const s = v == null ? '' : String(v)
       return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
@@ -71,7 +74,7 @@ export function HistoryDialog({ onClose }: { onClose: () => void }) {
     const lines = [cols.join(',')]
     for (const m of filtered) {
       lines.push([
-        m.missionNo, m.type, m.status, m.priority, m.agvId ?? '',
+        m.missionNo, m.type, m.status, m.priority, m.agvId ?? '', m.createdBy ?? '',
         m.pickupStorageName ?? '', m.dropoffStorageName ?? '', m.startNode, m.endNode,
         m.progress, durationSec(m) ?? '', m.createdAt, m.startedAt ?? '', m.finishedAt ?? '',
       ].map(esc).join(','))
@@ -115,6 +118,11 @@ export function HistoryDialog({ onClose }: { onClose: () => void }) {
               <option value="">All</option>{types.map(t => <option key={t} value={t}>{t}</option>)}
             </select>
           </Field>
+          <Field label="By">
+            <select value={by} onChange={e => setBy(e.target.value)} style={{ ...inp, width: 120 }}>
+              <option value="">All</option>{byList.map(u => <option key={u} value={u}>{u}</option>)}
+            </select>
+          </Field>
           <Field label="From"><input type="date" value={from} onChange={e => setFrom(e.target.value)} style={{ ...inp, width: 130 }} /></Field>
           <Field label="To"><input type="date" value={to} onChange={e => setTo(e.target.value)} style={{ ...inp, width: 130 }} /></Field>
           <button onClick={reset} style={{ ...miniBtn }}>CLEAR</button>
@@ -128,7 +136,7 @@ export function HistoryDialog({ onClose }: { onClose: () => void }) {
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 10.5, fontFamily: 'Roboto Mono' }}>
               <thead>
                 <tr style={{ position: 'sticky', top: 0, background: 'var(--bg)', textAlign: 'left', color: 'var(--text-muted)' }}>
-                  {['Mission', 'Type', 'Status', 'Prio', 'AGV', 'Pickup → Dropoff', 'Progress', 'Duration', 'Created'].map(h => (
+                  {['Mission', 'Type', 'Status', 'Prio', 'AGV', 'By', 'Pickup → Dropoff', 'Progress', 'Duration', 'Created'].map(h => (
                     <th key={h} style={{ padding: '6px 8px', borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap' }}>{h}</th>
                   ))}
                 </tr>
@@ -143,6 +151,7 @@ export function HistoryDialog({ onClose }: { onClose: () => void }) {
                     </td>
                     <td style={{ padding: '5px 8px', color: m.priority <= 1 ? '#dc2626' : 'var(--text-muted)' }}>P{m.priority}</td>
                     <td style={{ padding: '5px 8px', color: 'var(--text)' }}>{m.agvId ?? '—'}</td>
+                    <td style={{ padding: '5px 8px', color: m.createdBy ? 'var(--text-2)' : 'var(--text-faint)' }}>{m.createdBy ?? '—'}</td>
                     <td style={{ padding: '5px 8px', color: 'var(--text-2)' }}>{(m.pickupStorageName || m.startNode)} → {(m.dropoffStorageName || m.endNode)}</td>
                     <td style={{ padding: '5px 8px', color: 'var(--text-2)' }}>{m.progress}%</td>
                     <td style={{ padding: '5px 8px', color: 'var(--text-2)' }}>{fmtDur(durationSec(m))}</td>
@@ -150,7 +159,7 @@ export function HistoryDialog({ onClose }: { onClose: () => void }) {
                   </tr>
                 ))}
                 {!filtered.length && (
-                  <tr><td colSpan={9} style={{ padding: 16, color: 'var(--text-faint)', textAlign: 'center' }}>No matching tasks</td></tr>
+                  <tr><td colSpan={10} style={{ padding: 16, color: 'var(--text-faint)', textAlign: 'center' }}>No matching tasks</td></tr>
                 )}
               </tbody>
             </table>

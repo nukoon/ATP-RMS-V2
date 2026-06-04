@@ -43,6 +43,7 @@ export interface Mission {
   pickupStorageName?: string | null
   dropoffStorageName?: string | null
   actions?: MissionAction[]   // resolved VDA5050 action plan snapshot
+  createdBy?: string | null   // operator who issued the command (display name)
   createdAt: string
   assignedAt?: string | null
   startedAt?: string | null

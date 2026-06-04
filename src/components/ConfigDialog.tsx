@@ -7,15 +7,19 @@ import { useEffect, useState } from 'react'
 import type { AgvModel } from '@/types'
 import type { AmrConfig } from '@/types/fleet'
 import { useConfigStore } from '@/store/config.store'
+import { useAuthStore } from '@/store/auth.store'
 import { ApiError } from '@/services/api'
 import { AGV_SPECS } from '@/constants/agv-specs'
 import { AGV_MODELS } from '@/constants'
+import { UsersTab } from '@/components/UsersManager'
 
-type Tab = 'amrs' | 'maps' | 'broker'
+type Tab = 'amrs' | 'maps' | 'broker' | 'users'
 const COLORS = ['var(--accent)', '#16a34a', '#f59e0b', '#dc2626', '#7c3aed', '#ea7a00', '#0891b2', '#db2777']
 
 export function ConfigDialog({ onClose, initialTab = 'amrs' }: { onClose: () => void; initialTab?: Tab }) {
+  const isAdmin = useAuthStore(s => s.user?.role === 'ADMIN')
   const [tab, setTab] = useState<Tab>(initialTab)
+  const tabs: [Tab, string][] = [['amrs', 'AMRs'], ['maps', 'MAPS'], ['broker', 'BROKER'], ...(isAdmin ? [['users', 'USERS'] as [Tab, string]] : [])]
   return (
     <div onClick={onClose}
       style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
@@ -28,7 +32,7 @@ export function ConfigDialog({ onClose, initialTab = 'amrs' }: { onClose: () => 
         </div>
         {/* tabs */}
         <div style={{ display: 'flex', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
-          {([['amrs', 'AMRs'], ['maps', 'MAPS'], ['broker', 'BROKER']] as [Tab, string][]).map(([k, l]) => (
+          {tabs.map(([k, l]) => (
             <button key={k} onClick={() => setTab(k)}
               style={{ flex: 1, padding: '8px 0', fontSize: 10, fontWeight: 600, letterSpacing: 1, cursor: 'pointer', fontFamily: 'Inter, "Noto Sans JP", sans-serif',
                 background: tab === k ? 'rgba(37,99,235,0.08)' : 'transparent', color: tab === k ? 'var(--accent)' : 'var(--text-muted)',
@@ -39,6 +43,7 @@ export function ConfigDialog({ onClose, initialTab = 'amrs' }: { onClose: () => 
           {tab === 'amrs'   && <AmrTab />}
           {tab === 'maps'   && <MapTab />}
           {tab === 'broker' && <BrokerTab />}
+          {tab === 'users'  && isAdmin && <UsersTab />}
         </div>
       </div>
     </div>
