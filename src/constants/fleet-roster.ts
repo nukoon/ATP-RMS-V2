@@ -14,8 +14,8 @@ export interface FleetMember {
 }
 
 export const FLEET_ROSTER: FleetMember[] = [
-  { id: 'ATP-01', model: 'AM15',  color: '#2563eb' },
-  { id: 'ATP-02', model: 'AM15',  color: '#16a34a' },
+  { id: 'ATP-01', model: 'APe15', color: '#2563eb' },
+  { id: 'ATP-02', model: 'APe15', color: '#16a34a' },
   { id: 'ATP-03', model: 'MP10S', color: '#f59e0b' },
   { id: 'ATP-04', model: 'AS15',  color: '#dc2626' },
   { id: 'ATP-05', model: 'TP30',  color: '#7c3aed' },
