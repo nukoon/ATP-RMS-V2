@@ -28,6 +28,22 @@ const wrap = (fn) => (req, res) => fn(req, res).catch((err) => {
   res.status(500).json({ error: 'server error' })
 })
 
+// ── multi-user sync: bump a global revision after every successful change to
+// shared data, so other clients can poll /api/sync and auto-refresh. One place
+// (res 'finish') instead of sprinkling calls through every mutating handler.
+const SYNC_PATHS = /^\/api\/(storages|areas|docks|traffic-areas|actions|missions|config)/
+async function bumpSync(req) {
+  const who = (req.user && (req.user.realName || req.user.username)) || null
+  const scope = (req.path.split('/')[2] || 'data').replace('traffic-areas', 'traffic')
+  await pool.query('UPDATE sync_state SET rev = rev + 1, scope = ?, updated_by = ? WHERE id = 1', [scope, who])
+}
+app.use((req, res, next) => {
+  if (['POST', 'PATCH', 'PUT', 'DELETE'].includes(req.method) && SYNC_PATHS.test(req.path)) {
+    res.on('finish', () => { if (res.statusCode < 400) bumpSync(req).catch(() => {}) })
+  }
+  next()
+})
+
 // ── health ────────────────────────────────────────────────
 app.get('/api/health', wrap(async (_req, res) => {
   await pool.query('SELECT 1')
@@ -139,13 +155,39 @@ app.delete('/api/users/:id', requireAuth, requireRole('ADMIN'), wrap(async (req,
   res.json({ ok: true })
 }))
 
+// ── Sync revision (clients poll to auto-refresh on concurrent edits) ──
+app.get('/api/sync', requireAuth, wrap(async (_req, res) => {
+  const [rows] = await pool.query('SELECT rev, scope, updated_by, updated_at FROM sync_state WHERE id = 1')
+  const r = rows[0] || { rev: 0 }
+  res.json({ rev: Number(r.rev), scope: r.scope || null, updatedBy: r.updated_by || null, updatedAt: r.updated_at || null })
+}))
+
+// ── Shared app config (server-saved, so every operator sees the same setup) ──
+app.get('/api/config', requireAuth, wrap(async (_req, res) => {
+  const [rows] = await pool.query('SELECT k, v FROM app_config')
+  const out = {}
+  for (const r of rows) out[r.k] = typeof r.v === 'string' ? JSON.parse(r.v) : r.v
+  res.json(out)
+}))
+
+app.put('/api/config/:key', requireAuth, requireRole('OPERATOR'), wrap(async (req, res) => {
+  const key = req.params.key
+  const value = req.body && Object.prototype.hasOwnProperty.call(req.body, 'value') ? req.body.value : req.body
+  const who = actorOf(req)
+  await pool.query(
+    'INSERT INTO app_config (k, v, updated_by) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE v = VALUES(v), updated_by = VALUES(updated_by)',
+    [key, JSON.stringify(value ?? null), who],
+  )
+  res.json({ ok: true, key })
+}))
+
 // ── AMRs (backed by the `agv` table joined to `agv_type`) ──
 const SELECT_AMR =
-  `SELECT a.sn AS serial, a.name, t.code AS model, a.color, a.ip, a.enabled
+  `SELECT a.sn AS serial, a.name, t.code AS model, a.color, a.brand, a.ip, a.enabled
      FROM agv a JOIN agv_type t ON a.agv_type_id = t.id`
 
 function rowToAmr(r) {
-  return { serial: r.serial, name: r.name, model: r.model, color: r.color, ip: r.ip || '', enabled: !!r.enabled }
+  return { serial: r.serial, name: r.name, model: r.model, color: r.color, brand: r.brand || 'aiten', ip: r.ip || '', enabled: !!r.enabled }
 }
 
 app.get('/api/amrs', requireAuth, wrap(async (_req, res) => {
@@ -154,7 +196,7 @@ app.get('/api/amrs', requireAuth, wrap(async (_req, res) => {
 }))
 
 app.post('/api/amrs', requireAuth, wrap(async (req, res) => {
-  const { serial, name, model, color, ip, enabled } = req.body || {}
+  const { serial, name, model, color, brand, ip, enabled } = req.body || {}
   if (!serial || !model) return res.status(400).json({ error: 'serial and model required' })
 
   const [types] = await pool.query('SELECT id FROM agv_type WHERE code = ? LIMIT 1', [model])
@@ -164,9 +206,9 @@ app.post('/api/amrs', requireAuth, wrap(async (req, res) => {
   if (exists[0]) return res.status(409).json({ error: 'serial already registered' })
 
   await pool.query(
-    `INSERT INTO agv (sn, name, agv_type_id, color, ip, enabled, status)
-     VALUES (?, ?, ?, ?, ?, ?, 'OFFLINE')`,
-    [serial, name || serial, types[0].id, color || '#00d4ff', ip || null, enabled === false ? 0 : 1],
+    `INSERT INTO agv (sn, name, agv_type_id, color, brand, ip, enabled, status)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 'OFFLINE')`,
+    [serial, name || serial, types[0].id, color || '#00d4ff', brand || 'aiten', ip || null, enabled === false ? 0 : 1],
   )
   const [rows] = await pool.query(`${SELECT_AMR} WHERE a.sn = ?`, [serial])
   res.status(201).json(rowToAmr(rows[0]))
@@ -174,11 +216,12 @@ app.post('/api/amrs', requireAuth, wrap(async (req, res) => {
 
 app.patch('/api/amrs/:sn', requireAuth, wrap(async (req, res) => {
   const sn = req.params.sn
-  const { name, model, color, ip, enabled } = req.body || {}
+  const { name, model, color, brand, ip, enabled } = req.body || {}
   const sets = []
   const vals = []
   if (name !== undefined)  { sets.push('name = ?');  vals.push(name) }
   if (color !== undefined) { sets.push('color = ?'); vals.push(color) }
+  if (brand !== undefined) { sets.push('brand = ?'); vals.push(brand || 'aiten') }
   if (ip !== undefined)    { sets.push('ip = ?');    vals.push(ip || null) }
   if (enabled !== undefined) { sets.push('enabled = ?'); vals.push(enabled ? 1 : 0) }
   if (model !== undefined) {

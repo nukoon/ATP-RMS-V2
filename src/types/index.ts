@@ -196,7 +196,7 @@ export interface VDA5050Order {
 }
 
 // ── MQTT Log ───────────────────────────────────────────────
-export type VDA5050Topic = 'state' | 'visualization' | 'order' | 'connection' | 'factsheet'
+export type VDA5050Topic = 'state' | 'visualization' | 'order' | 'connection' | 'factsheet' | 'instantActions'
 
 export interface MqttLogEntry {
   id: string

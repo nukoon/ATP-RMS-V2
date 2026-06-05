@@ -11,22 +11,32 @@ export interface MqttConfig {
   brokerUrl: string       // e.g. "ws://192.168.1.100:9001"
   username?: string
   password?: string
-  manufacturer: string   // e.g. "ATP"
+}
+
+// per-robot VDA5050 topic identity (derived from the robot's brand preset)
+export interface MqttRobot {
+  serial: string
+  manufacturer: string    // VDA5050 manufacturer segment, e.g. "SEER" / "ATP"
+  baseTopic: string       // topic prefix incl. version, e.g. "robot/v2" or "uagv/v2"
 }
 
 type StateCallback   = (robotId: string, state: VDA5050State) => void
 type ConnectCallback = (connected: boolean) => void
+// per-robot VDA5050 connection state (ONLINE / OFFLINE / CONNECTIONBROKEN)
+type RobotConnCallback = (robotId: string, online: boolean) => void
 
 export class MqttService {
   private client: MqttClient | null = null
   private config: MqttConfig | null = null
-  private robotIds: string[] = []
+  // serial → {manufacturer, baseTopic} from each robot's brand preset
+  private robots = new Map<string, { manufacturer: string; baseTopic: string }>()
   private onState:   StateCallback   = () => {}
   private onConnect: ConnectCallback = () => {}
+  private onRobotConn: RobotConnCallback = () => {}
 
-  connect(config: MqttConfig, robotIds: string[]) {
-    this.config   = config
-    this.robotIds = robotIds
+  connect(config: MqttConfig, robots: MqttRobot[]) {
+    this.config = config
+    this.robots = new Map(robots.map(r => [r.serial, { manufacturer: r.manufacturer, baseTopic: r.baseTopic }]))
 
     this.client = mqtt.connect(config.brokerUrl, {
       username: config.username,
@@ -59,7 +69,7 @@ export class MqttService {
   private subscribeAll() {
     if (!this.client || !this.config) return
     const topics: VDA5050Topic[] = ['state', 'visualization', 'connection']
-    for (const robotId of this.robotIds) {
+    for (const robotId of this.robots.keys()) {
       for (const t of topics) {
         const fullTopic = this.buildTopic(robotId, t)
         this.client.subscribe(fullTopic, { qos: MQTT_QOS }, (err) => {
@@ -71,8 +81,10 @@ export class MqttService {
   }
 
   private buildTopic(robotId: string, topic: VDA5050Topic): string {
-    const mfr = this.config?.manufacturer ?? 'ATP'
-    return `${MQTT_BASE_TOPIC}/${mfr}/${robotId}/${topic}`
+    const r = this.robots.get(robotId)
+    const mfr  = r?.manufacturer ?? 'ATP'
+    const base = r?.baseTopic || MQTT_BASE_TOPIC   // brand-specific prefix (robot/v2, uagv/v2…)
+    return `${base}/${mfr}/${robotId}/${topic}`
   }
 
   private handleMessage(topic: string, payload: Buffer) {
@@ -84,6 +96,10 @@ export class MqttService {
 
       if (topicType === 'state' || topicType === 'visualization') {
         this.onState(robotId, data as VDA5050State)
+      } else if (topicType === 'connection') {
+        // VDA5050 connection message: connectionState ONLINE/OFFLINE/CONNECTIONBROKEN
+        const cs = (data as { connectionState?: string }).connectionState
+        this.onRobotConn(robotId, cs === 'ONLINE')
       }
     } catch (e) {
       console.warn('[MQTT] Parse error:', topic, e)
@@ -96,8 +112,17 @@ export class MqttService {
     this.client.publish(topic, JSON.stringify(order), { qos: MQTT_QOS })
   }
 
+  // VDA5050 instantActions (cancelOrder / startPause / stopPause / startCharging…)
+  // — the channel real robots use for immediate commands outside an order.
+  sendInstantActions(robotId: string, message: unknown) {
+    if (!this.client || !this.config) return
+    const topic = this.buildTopic(robotId, 'instantActions')
+    this.client.publish(topic, JSON.stringify(message), { qos: MQTT_QOS })
+  }
+
   onStateUpdate(cb: StateCallback)   { this.onState   = cb }
   onConnectionChange(cb: ConnectCallback) { this.onConnect = cb }
+  onRobotConnection(cb: RobotConnCallback) { this.onRobotConn = cb }
 
   disconnect() {
     this.client?.end()

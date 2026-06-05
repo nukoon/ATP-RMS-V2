@@ -58,6 +58,13 @@ export const api = {
     }),
   me: () => request<{ user: SysUser }>('/auth/me'),
 
+  // multi-user sync: a global revision bumped on every shared-data change
+  getSync: () => request<{ rev: number; scope: string | null; updatedBy: string | null; updatedAt: string | null }>('/sync'),
+  // server-saved shared config (broker, …)
+  getConfig: () => request<Record<string, unknown>>('/config'),
+  putConfig: (key: string, value: unknown) =>
+    request<{ ok: true }>(`/config/${encodeURIComponent(key)}`, { method: 'PUT', body: JSON.stringify({ value }) }),
+
   // User management (ADMIN only)
   listUsers: () => request<SysUser[]>('/users'),
   createUser: (u: { username: string; password: string; realName?: string; role?: SysUser['role']; enabled?: boolean }) =>

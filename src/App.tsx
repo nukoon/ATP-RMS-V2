@@ -3,6 +3,7 @@
  * TODO: Connect real MQTT broker URL from environment config
  */
 import { useEffect, useState } from 'react'
+import { useSync } from '@/hooks/useSync'
 import { useFleetStore } from '@/store/fleet.store'
 import { useConfigStore } from '@/store/config.store'
 import { useAuthStore } from '@/store/auth.store'
@@ -28,6 +29,7 @@ import { Map3DCanvas }  from '@/components/map/Map3DCanvas'
 import { useThemeStore } from '@/store/theme.store'
 import { StatusBar }    from '@/components/StatusBar'
 import { useMapTransform } from '@/hooks/useMapTransform'
+import { VDA_BRANDS } from '@/constants/vda-brands'
 
 type RightTab = 'missions' | 'storage'
 
@@ -66,14 +68,18 @@ export default function App() {
   const missions = useFleetStore(s => s.missions)
 
   const { maps, activeMapId, amrs, broker, loadAmrs } = useConfigStore()
+  const loadBroker = useConfigStore(s => s.loadBroker)
   const authUser = useAuthStore(s => s.user)
   const clearAuth = useAuthStore(s => s.clearAuth)
+  // multi-user sync: prompt to pull when others change shared data; confirm own edits
+  const { pending: syncPending, justSynced, syncing, sync } = useSync()
 
   const loadStorages = useStorageStore(s => s.loadAll)
 
-  // Load the operator's registered AMRs + storages from the DB on entry.
+  // Load the operator's registered AMRs + storages + shared broker config on entry.
   useEffect(() => { loadAmrs().catch(err => console.error('[AMR] load failed', err)) }, [loadAmrs])
   useEffect(() => { loadStorages().catch(err => console.error('[STORAGE] load failed', err)) }, [loadStorages])
+  useEffect(() => { loadBroker().catch(() => {}) }, [loadBroker])
 
   // load the active map (builtin URL or uploaded JSON) whenever it changes
   useEffect(() => {
@@ -110,10 +116,13 @@ export default function App() {
     }
     mqttService.onStateUpdate((id, st) => useFleetStore.getState().updateFromVDA5050(id, st))
     mqttService.onConnectionChange((c) => useFleetStore.getState().setMqttConnected(c))
-    mqttService.connect(
-      { brokerUrl: broker.wsUrl, username: broker.username, password: broker.password, manufacturer: broker.manufacturer },
-      enabled.map(a => a.serial),
-    )
+    mqttService.onRobotConnection((id, online) => console.log(`[MQTT] robot ${id} ${online ? 'ONLINE' : 'OFFLINE'}`))
+    // each robot gets its own topic identity from its brand preset
+    const mqttRobots = enabled.map(a => {
+      const b = VDA_BRANDS[a.brand] ?? VDA_BRANDS.aiten
+      return { serial: a.serial, manufacturer: b.manufacturer, baseTopic: b.baseTopic }
+    })
+    mqttService.connect({ brokerUrl: broker.wsUrl, username: broker.username, password: broker.password }, mqttRobots)
     setLive(true)
   }
 
@@ -132,6 +141,26 @@ export default function App() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: 'var(--bg)', color: 'var(--text)', fontFamily: 'Inter, "Noto Sans JP", sans-serif' }}>
+      {/* multi-user sync: another operator changed shared data → prompt to pull (manual) */}
+      {syncPending && (
+        <div style={{ position: 'fixed', top: 10, left: '50%', transform: 'translateX(-50%)', zIndex: 1200,
+          display: 'flex', alignItems: 'center', gap: 10, padding: '7px 10px 7px 14px', borderRadius: 8,
+          background: 'rgba(234,122,0,0.97)', color: '#fff', boxShadow: '0 4px 16px rgba(26,34,48,0.3)',
+          fontFamily: 'Inter, "Noto Sans JP", sans-serif', fontSize: 12 }}>
+          ⚠ {syncPending.scope === 'config' ? 'Configuration' : 'Map data'} changed{syncPending.by ? ` by ${syncPending.by}` : ''} — sync to load the latest
+          <button onClick={() => sync()} disabled={syncing}
+            style={{ display: 'flex', alignItems: 'center', gap: 4, background: '#fff', color: '#ea7a00', border: 'none', borderRadius: 5,
+              padding: '3px 10px', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>{syncing ? '… SYNCING' : '⟳ SYNC NOW'}</button>
+        </div>
+      )}
+      {/* your own edit was saved into the shared system */}
+      {justSynced && !syncPending && (
+        <div style={{ position: 'fixed', top: 10, left: '50%', transform: 'translateX(-50%)', zIndex: 1200,
+          padding: '7px 14px', borderRadius: 8, background: 'rgba(22,163,74,0.96)', color: '#fff',
+          boxShadow: '0 4px 16px rgba(26,34,48,0.3)', fontFamily: 'Inter, "Noto Sans JP", sans-serif', fontSize: 12 }}>
+          ✓ Your changes were synced to the system
+        </div>
+      )}
       {/* TOP BAR */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '6px 14px', background: 'var(--surface)', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
         <img src="/assets/brand/logo_autoprobot.svg" style={{ height: 28, objectFit: 'contain' }} />
@@ -155,6 +184,14 @@ export default function App() {
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" /></svg>
             )}
             {theme === 'dark' ? 'LIGHT' : 'DARK'}
+          </button>
+          <button onClick={() => sync()} disabled={syncing}
+            title={syncPending ? `Changes by ${syncPending.by ?? 'another user'} — click to load the latest` : 'Sync shared data'}
+            style={{ fontFamily: 'Roboto Mono', fontSize: 9, cursor: 'pointer',
+              color: syncPending ? '#ea7a00' : 'var(--text-muted)',
+              border: `1px solid ${syncPending ? 'rgba(234,122,0,0.5)' : 'var(--border)'}`,
+              background: syncPending ? 'rgba(234,122,0,0.1)' : 'transparent', padding: '2px 7px', borderRadius: 2 }}>
+            {syncing ? '⟳ …' : syncPending ? '⟳ SYNC ●' : '⟳ SYNC'}
           </button>
           <button onClick={() => openConfig('broker')}
             style={{ fontFamily: 'Roboto Mono', fontSize: 9, cursor: 'pointer', color: 'var(--text-muted)',

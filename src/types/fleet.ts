@@ -172,6 +172,7 @@ export interface AmrConfig {
   color: string
   ip: string              // robot IP (reference / per-robot broker host)
   enabled: boolean        // include when connecting
+  brand: VdaBrandId       // robot vendor → its VDA5050 topic scheme + manufacturer
 }
 
 // A user-added map (ATP JSON), stored locally and switchable.
@@ -183,14 +184,21 @@ export interface MapConfig {
   data?: string           // raw ATP JSON for uploaded maps
 }
 
+// Robot vendor / VDA5050 integration brand. Different brands use different
+// topic prefixes + manufacturer segments (e.g. Aiten/SEER = robot/v2/SEER,
+// generic VDA5050 = uagv/v2). Presets live in constants/vda-brands.ts.
+export type VdaBrandId = 'aiten' | 'seer' | 'generic'
+
 // MQTT broker the browser connects to (WebSocket only — see note in
 // mqtt.service). For real robots that speak TCP 1883, point this at a
 // Mosquitto bridge exposing a WebSocket listener.
 export interface BrokerConfig {
+  brand: VdaBrandId       // robot vendor preset (sets topic scheme + manufacturer)
   wsUrl: string           // e.g. ws://localhost:9001
   username?: string
   password?: string
-  manufacturer: string    // VDA5050 manufacturer segment, e.g. ATP
+  manufacturer: string    // VDA5050 manufacturer segment, e.g. SEER / ATP
+  baseTopic: string       // topic prefix incl. version, e.g. robot/v2 or uagv/v2
 }
 
 // RBAC

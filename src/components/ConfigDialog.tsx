@@ -5,7 +5,8 @@
  */
 import { useEffect, useState } from 'react'
 import type { AgvModel } from '@/types'
-import type { AmrConfig } from '@/types/fleet'
+import type { AmrConfig, VdaBrandId } from '@/types/fleet'
+import { VDA_BRANDS, VDA_BRAND_LIST } from '@/constants/vda-brands'
 import { useConfigStore } from '@/store/config.store'
 import { useAuthStore } from '@/store/auth.store'
 import { ApiError } from '@/services/api'
@@ -65,14 +66,16 @@ const primaryBtn: React.CSSProperties = {
 
 // ── AMRs tab ───────────────────────────────────────────────
 function AmrTab() {
-  const { amrs, amrsLoaded, loadAmrs, addAmr, removeAmr, updateAmr } = useConfigStore()
+  const { amrs, amrsLoaded, loadAmrs, addAmr, removeAmr, updateAmr, broker } = useConfigStore()
   const [serial, setSerial] = useState('')
   const [name, setName]     = useState('')
   const [model, setModel]   = useState<AgvModel>('AM15')
+  const [brand, setBrand]   = useState<VdaBrandId>(broker.brand)   // default to the fleet brand
   const [ip, setIp]         = useState('')
   const [color, setColor]   = useState(COLORS[0])
   const [busy, setBusy]     = useState(false)
   const [err, setErr]       = useState('')
+  const bp = VDA_BRANDS[brand] ?? VDA_BRANDS.aiten
 
   // Pull the live list from the DB the first time the tab is shown.
   useEffect(() => {
@@ -84,7 +87,7 @@ function AmrTab() {
   const add = async () => {
     if (!canAdd) return
     setErr(''); setBusy(true)
-    const a: AmrConfig = { serial: serial.trim(), name: name.trim() || serial.trim(), model, ip: ip.trim(), color, enabled: true }
+    const a: AmrConfig = { serial: serial.trim(), name: name.trim() || serial.trim(), model, brand, ip: ip.trim(), color, enabled: true }
     try {
       await addAmr(a)
       setSerial(''); setName(''); setIp('')
@@ -109,7 +112,13 @@ function AmrTab() {
             {AGV_MODELS.map(m => <option key={m} value={m}>{m} — {AGV_SPECS[m].name}</option>)}
           </select>
         </div>
-        <div><Label>IP Address</Label><input style={inputStyle} value={ip} onChange={e => setIp(e.target.value)} placeholder="192.168.1.56" /></div>
+        <div>
+          <Label>Brand</Label>
+          <select style={inputStyle} value={brand} onChange={e => setBrand(e.target.value as VdaBrandId)}>
+            {VDA_BRAND_LIST.map(b => <option key={b.id} value={b.id}>{b.label}</option>)}
+          </select>
+        </div>
+        <div style={{ gridColumn: '1 / -1' }}><Label>IP Address</Label><input style={inputStyle} value={ip} onChange={e => setIp(e.target.value)} placeholder="192.168.1.56" /></div>
       </div>
       <div>
         <Label>Identity Colour</Label>
@@ -123,7 +132,7 @@ function AmrTab() {
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
         <button style={{ ...primaryBtn, opacity: canAdd ? 1 : 0.4, cursor: canAdd ? 'pointer' : 'not-allowed' }} onClick={add}>{busy ? '… SAVING' : '+ ADD AMR'}</button>
-        <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>Topic: uagv/v2/&lt;mfr&gt;/<b style={{ color: 'var(--accent)' }}>{serial || 'serial'}</b>/state</span>
+        <span style={{ fontSize: 9, color: 'var(--text-muted)', fontFamily: 'Roboto Mono' }}>Topic: {bp.baseTopic}/{bp.manufacturer}/<b style={{ color: 'var(--accent)' }}>{serial || 'serial'}</b>/state</span>
       </div>
       {err && <div style={{ fontSize: 10, color: '#dc2626', background: 'rgba(220,38,38,0.08)', border: '1px solid rgba(220,38,38,0.25)', borderRadius: 3, padding: '5px 8px' }}>{err}</div>}
 
@@ -151,11 +160,12 @@ function AmrRow({ a, updateAmr, removeAmr, onErr }: {
   const [editing, setEditing] = useState(false)
   const [name, setName]   = useState(a.name)
   const [model, setModel] = useState<AgvModel>(a.model)
+  const [brand, setBrand] = useState<VdaBrandId>(a.brand)
   const [ip, setIp]       = useState(a.ip)
 
-  const start = () => { setName(a.name); setModel(a.model); setIp(a.ip); setEditing(true) }
+  const start = () => { setName(a.name); setModel(a.model); setBrand(a.brand); setIp(a.ip); setEditing(true) }
   const save = async () => {
-    try { await updateAmr(a.serial, { name: name.trim() || a.serial, model, ip: ip.trim() }); setEditing(false) }
+    try { await updateAmr(a.serial, { name: name.trim() || a.serial, model, brand, ip: ip.trim() }); setEditing(false) }
     catch (e) { onErr(e) }
   }
 
@@ -164,8 +174,11 @@ function AmrRow({ a, updateAmr, removeAmr, onErr }: {
       <div style={{ gridColumn: '1 / -1', fontFamily: 'Roboto Mono', fontSize: 10, color: 'var(--text-muted)' }}>Editing {a.serial}</div>
       <input style={inputStyle} value={name} onChange={e => setName(e.target.value)} placeholder="Display name" />
       <input style={inputStyle} value={ip} onChange={e => setIp(e.target.value)} placeholder="IP address" />
-      <select style={{ ...inputStyle, gridColumn: '1 / -1' }} value={model} onChange={e => setModel(e.target.value as AgvModel)}>
+      <select style={inputStyle} value={model} onChange={e => setModel(e.target.value as AgvModel)}>
         {AGV_MODELS.map(m => <option key={m} value={m}>{m} — {AGV_SPECS[m].name}</option>)}
+      </select>
+      <select style={inputStyle} value={brand} onChange={e => setBrand(e.target.value as VdaBrandId)}>
+        {VDA_BRAND_LIST.map(b => <option key={b.id} value={b.id}>{b.label}</option>)}
       </select>
       <div style={{ gridColumn: '1 / -1', display: 'flex', gap: 6 }}>
         <button onClick={save} style={{ ...primaryBtn, flex: 1, padding: '4px 0' }}>SAVE</button>
@@ -179,7 +192,8 @@ function AmrRow({ a, updateAmr, removeAmr, onErr }: {
     <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', borderBottom: '1px solid rgba(212,218,227,0.5)', fontSize: 11 }}>
       <input type="checkbox" checked={a.enabled} onChange={e => { updateAmr(a.serial, { enabled: e.target.checked }).catch(onErr) }} style={{ accentColor: 'var(--accent)' }} />
       <span style={{ fontFamily: 'Roboto Mono', color: 'var(--text)', width: 70 }} title={a.name}>{a.serial}</span>
-      <span style={{ color: 'var(--text-muted)', width: 48 }}>{a.model}</span>
+      <span style={{ color: 'var(--text-muted)', width: 44 }}>{a.model}</span>
+      <span title={`brand: ${a.brand}`} style={{ fontSize: 8, color: 'var(--accent)', border: '1px solid rgba(37,99,235,0.3)', borderRadius: 2, padding: '0 4px', textTransform: 'uppercase' }}>{a.brand}</span>
       <span style={{ display: 'flex', gap: 2 }}>
         {COLORS.map(c => (
           <button key={c} title="set colour" onClick={() => { updateAmr(a.serial, { color: c }).catch(onErr) }}
@@ -243,18 +257,44 @@ function MapTab() {
 // ── Broker tab ─────────────────────────────────────────────
 function BrokerTab() {
   const { broker, setBroker } = useConfigStore()
+  const brand = VDA_BRANDS[broker.brand] ?? VDA_BRANDS.aiten
+
+  // switching brand pre-fills the topic scheme + manufacturer (still editable)
+  const pickBrand = (id: VdaBrandId) => {
+    const b = VDA_BRANDS[id]
+    setBroker({ brand: id, baseTopic: b.baseTopic, manufacturer: b.manufacturer, wsUrl: broker.wsUrl || b.defaultWsUrl })
+  }
+  const sampleSerial = '102'
+  const topicPreview = `${brand.baseTopic}/${brand.manufacturer}/${sampleSerial}/state`
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-      <div><Label>WebSocket URL *</Label><input style={inputStyle} value={broker.wsUrl} onChange={e => setBroker({ wsUrl: e.target.value })} placeholder="ws://localhost:9001" /></div>
+      {/* default brand for new AMRs (each AMR can override its own brand) */}
+      <div>
+        <Label>Default robot brand</Label>
+        <select style={inputStyle} value={broker.brand} onChange={e => pickBrand(e.target.value as VdaBrandId)}>
+          {VDA_BRAND_LIST.map(b => <option key={b.id} value={b.id}>{b.label}</option>)}
+        </select>
+      </div>
+
+      <div><Label>WebSocket URL *</Label><input style={inputStyle} value={broker.wsUrl} onChange={e => setBroker({ wsUrl: e.target.value })} placeholder={brand.defaultWsUrl} /></div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
         <div><Label>Username</Label><input style={inputStyle} value={broker.username ?? ''} onChange={e => setBroker({ username: e.target.value })} /></div>
         <div><Label>Password</Label><input style={inputStyle} type="password" value={broker.password ?? ''} onChange={e => setBroker({ password: e.target.value })} /></div>
       </div>
-      <div><Label>VDA5050 Manufacturer</Label><input style={inputStyle} value={broker.manufacturer} onChange={e => setBroker({ manufacturer: e.target.value })} placeholder="ATP" /></div>
+      {/* topic scheme + manufacturer come from the brand preset (per-AMR brand wins) */}
+      <div style={{ fontSize: 9, color: 'var(--text-muted)', fontFamily: 'Roboto Mono' }}>
+        Topic: <span style={{ color: 'var(--accent)' }}>{topicPreview}</span> <span style={{ color: 'var(--text-faint)' }}>· mfr {brand.manufacturer} · serial per robot</span>
+      </div>
 
-      <div style={{ marginTop: 4, padding: 10, background: 'rgba(245,158,11,0.06)', border: '1px solid rgba(245,158,11,0.25)', borderRadius: 3, fontSize: 10, color: '#c9b890', lineHeight: 1.5 }}>
+      {/* brand-specific guidance */}
+      <div style={{ padding: 10, background: 'rgba(37,99,235,0.05)', border: '1px solid rgba(37,99,235,0.2)', borderRadius: 3, fontSize: 10, color: 'var(--text-2)', lineHeight: 1.5 }}>
+        <b style={{ color: 'var(--accent)' }}>{brand.label}</b> — {brand.notes}
+      </div>
+
+      <div style={{ padding: 10, background: 'rgba(245,158,11,0.06)', border: '1px solid rgba(245,158,11,0.25)', borderRadius: 3, fontSize: 10, color: '#c9b890', lineHeight: 1.5 }}>
         <b style={{ color: '#f59e0b' }}>⚠ Real robots speak TCP 1883.</b> Browsers can only do MQTT over WebSocket,
-        so point this at a Mosquitto bridge:
+        so point this at the controller's WebSocket listener (or a Mosquitto bridge):
         <pre style={{ margin: '6px 0 0', fontFamily: 'Roboto Mono', fontSize: 9, color: 'var(--text-2)' }}>{`listener 1883            # AGV publishes here
 listener 9001
 protocol websockets      # browser connects here`}</pre>

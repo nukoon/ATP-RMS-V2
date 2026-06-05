@@ -5,7 +5,7 @@
  * VDA5050 action plan on the backend. On completion the storages flip state.
  */
 import { useState } from 'react'
-import type { Mission, Storage, StorageArea } from '@/types/fleet'
+import type { Mission, Storage, StorageArea, AmrConfig } from '@/types/fleet'
 import { useFleetStore } from '@/store/fleet.store'
 import { useStorageStore } from '@/store/storage.store'
 import { useConfigStore } from '@/store/config.store'
@@ -13,6 +13,10 @@ import { useAuthStore } from '@/store/auth.store'
 import { api, ApiError } from '@/services/api'
 import { mqttService } from '@/services/mqtt.service'
 import { buildVda5050Order } from '@/services/order.service'
+import { VDA_BRANDS } from '@/constants/vda-brands'
+
+// the VDA5050 manufacturer segment for a robot comes from its brand preset
+const mfrOf = (a: AmrConfig) => (VDA_BRANDS[a.brand] ?? VDA_BRANDS.aiten).manufacturer
 
 const STATUS_COLOR: Record<Mission['status'], string> = {
   PENDING:   'var(--text-muted)',
@@ -40,7 +44,6 @@ export function OrderPanel({ onManageStorage, sel, setSel, pickMode, onRequestPi
   const map         = useFleetStore(s => s.map)
   const mqttConnected = useFleetStore(s => s.mqttConnected)
   const storages    = useStorageStore(s => s.storages)
-  const broker      = useConfigStore(s => s.broker)
   const amrs        = useConfigStore(s => s.amrs)
 
   const areas       = useStorageStore(s => s.areas)
@@ -97,7 +100,7 @@ export function OrderPanel({ onManageStorage, sel, setSel, pickMode, onRequestPi
           addMission(m)
           if (mqttConnected) {
             const target = amrs.find(a => a.enabled)
-            if (target) mqttService.sendOrder(target.serial, buildVda5050Order(target.serial, broker.manufacturer, m, map))
+            if (target) mqttService.sendOrder(target.serial, buildVda5050Order(target.serial, mfrOf(target), m, map))
           }
         }
         setSel(s => ({ ...s, pickArea: undefined, dropArea: undefined })); onRequestPick(null)
@@ -107,7 +110,7 @@ export function OrderPanel({ onManageStorage, sel, setSel, pickMode, onRequestPi
         // LIVE: publish a VDA5050 Order (with the resolved PICK/DROP actions) to a real robot
         if (mqttConnected) {
           const target = amrs.find(a => a.enabled)
-          if (target) mqttService.sendOrder(target.serial, buildVda5050Order(target.serial, broker.manufacturer, m, map))
+          if (target) mqttService.sendOrder(target.serial, buildVda5050Order(target.serial, mfrOf(target), m, map))
         }
         setSel(s => ({ ...s, pickup: undefined, dropoff: undefined })); onRequestPick(null)
       }

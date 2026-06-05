@@ -8,12 +8,15 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import type { AmrConfig, MapConfig, BrokerConfig } from '@/types/fleet'
 import { api } from '@/services/api'
+import { VDA_BRANDS } from '@/constants/vda-brands'
 
 const DEFAULT_BROKER: BrokerConfig = {
+  brand: 'aiten',
   wsUrl: 'ws://localhost:9001',
   username: '',
   password: '',
-  manufacturer: 'ATP',
+  manufacturer: VDA_BRANDS.aiten.manufacturer,   // SEER
+  baseTopic: VDA_BRANDS.aiten.baseTopic,          // robot/v2
 }
 
 const BUILTIN_MAP: MapConfig = {
@@ -39,14 +42,22 @@ interface ConfigStore {
   removeMap: (id: string) => void
   setActiveMap: (id: string) => void
 
-  // Broker
+  // Broker (server-saved + shared across operators; localStorage is a cache)
   broker: BrokerConfig
   setBroker: (patch: Partial<BrokerConfig>) => void
+  loadBroker: () => Promise<void>
+}
+
+// debounced save of the broker to the shared server config
+let saveBrokerT: ReturnType<typeof setTimeout> | null = null
+function scheduleSaveBroker(broker: BrokerConfig) {
+  if (saveBrokerT) clearTimeout(saveBrokerT)
+  saveBrokerT = setTimeout(() => { api.putConfig('broker', broker).catch(() => { /* offline / no perm → keep local */ }) }, 600)
 }
 
 export const useConfigStore = create<ConfigStore>()(
   persist(
-    (set) => ({
+    (set, get) => ({
       amrs: [],
       amrsLoaded: false,
       loadAmrs: async () => {
@@ -77,7 +88,17 @@ export const useConfigStore = create<ConfigStore>()(
       setActiveMap: (id) => set({ activeMapId: id }),
 
       broker: DEFAULT_BROKER,
-      setBroker: (patch) => set(s => ({ broker: { ...s.broker, ...patch } })),
+      setBroker: (patch) => {
+        set(s => ({ broker: { ...s.broker, ...patch } }))
+        scheduleSaveBroker(get().broker)   // persist to the shared server config
+      },
+      loadBroker: async () => {
+        try {
+          const cfg = await api.getConfig()
+          const b = cfg.broker as Partial<BrokerConfig> | undefined
+          if (b && typeof b === 'object') set(s => ({ broker: { ...s.broker, ...b } }))
+        } catch { /* offline → keep the localStorage copy */ }
+      },
     }),
     {
       name: 'atp-rms-config',
@@ -88,7 +109,9 @@ export const useConfigStore = create<ConfigStore>()(
         const p = persisted as Partial<ConfigStore> | undefined
         const maps = p?.maps?.length ? p.maps : current.maps
         if (!maps.some(m => m.id === BUILTIN_MAP.id)) maps.unshift(BUILTIN_MAP)
-        return { ...current, ...p, maps }
+        // backfill new broker fields (brand/baseTopic) for configs saved before they existed
+        const broker = { ...DEFAULT_BROKER, ...(p?.broker ?? {}) }
+        return { ...current, ...p, maps, broker }
       },
     }
   )
