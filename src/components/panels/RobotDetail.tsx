@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import type { Robot } from '@/types'
 import { STATUS_COLOR, STATUS_LABEL, AGV_ASSET_PATH } from '@/constants'
 import { AGV_SPECS } from '@/constants/agv-specs'
@@ -34,7 +35,7 @@ export function RobotDetail({ robot: r, onClose, onAction }: Props) {
         <span style={{ width: 8, height: 8, borderRadius: '50%', background: idCol, boxShadow: `0 0 6px ${idCol}`, flexShrink: 0 }} />
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontFamily: 'Roboto Mono', fontSize: 12, color: 'var(--accent)' }}>{r.id}</div>
-          <div style={{ fontSize: 9, color: 'var(--text-muted)' }}>{spec?.name ?? r.model}</div>
+          <div style={{ fontSize: 9, color: 'var(--text-muted)' }}>{r.model}</div>
         </div>
         <span style={{ fontSize: 8, padding: '2px 6px', borderRadius: 2, fontWeight: 700, letterSpacing: 1, color: col, border: `1px solid ${col}40`, background: col + '12' }}>
           {STATUS_LABEL[r.status]}
@@ -96,29 +97,44 @@ export function RobotDetail({ robot: r, onClose, onAction }: Props) {
 
       {/* Quick actions */}
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, padding: '8px 12px', borderTop: '1px solid var(--border)' }}>
-        <ActionBtn label={isPaused ? 'Resume' : 'Pause'} color={isPaused ? '#16a34a' : '#f59e0b'}
+        <ActionBtn icon={isPaused ? <PlayIcon /> : <PauseIcon />} label={isPaused ? 'Resume' : 'Pause'} color={isPaused ? '#16a34a' : '#f59e0b'}
           onClick={() => onAction(isPaused ? 'RESUME' : 'PAUSE')} />
-        <ActionBtn label="Park"   color="#2563eb" onClick={() => onAction('PARK')} />
-        <ActionBtn label="Charge" color="#ea7a00" onClick={() => onAction('CHARGE')} />
-        <ActionBtn label="View"   color="#0891b2" onClick={() => onAction('VIEW')} title="Center the map on this robot" />
+        <ActionBtn icon={<ParkIcon />}   label="Park"   color="#2563eb" onClick={() => onAction('PARK')} title="Send to its park dock" />
+        <ActionBtn icon={<BoltIcon />}   label="Charge" color="#ea7a00" onClick={() => onAction('CHARGE')} title="Send to the nearest charge dock" />
+        <ActionBtn icon={<TargetIcon />} label="View"   color="#0891b2" onClick={() => onAction('VIEW')} title="Center the map on this robot" />
         {/* Leave: pull off the map to clear a real traffic deadlock; Return to bring it back */}
-        <ActionBtn label={isAway ? 'Return' : 'Leave'} color={isAway ? '#16a34a' : '#7c3aed'}
+        <ActionBtn icon={isAway ? <ReturnIcon /> : <ExitIcon />} label={isAway ? 'Return' : 'Leave'} color={isAway ? '#16a34a' : '#7c3aed'}
           onClick={() => onAction(isAway ? 'RETURN' : 'LEAVE')}
           title={isAway ? 'Bring the robot back onto the map' : 'Temporarily remove from the map so another AGV can pass a deadlock'} />
-        <ActionBtn label="Cancel" color="#dc2626" onClick={() => onAction('CANCEL')} />
+        <ActionBtn icon={<CancelIcon />} label="Cancel" color="#dc2626" onClick={() => onAction('CANCEL')} />
       </div>
     </div>
   )
 }
 
+// ── action icons (16px, stroke = currentColor) ──────────────
+const iconBase = { width: 15, height: 15, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const }
+const PauseIcon  = () => <svg {...iconBase}><rect x="6" y="5" width="4" height="14" rx="1" /><rect x="14" y="5" width="4" height="14" rx="1" /></svg>
+const PlayIcon   = () => <svg {...iconBase} fill="currentColor" stroke="none"><path d="M7 5l12 7-12 7z" /></svg>
+const ParkIcon   = () => <svg {...iconBase}><rect x="4" y="4" width="16" height="16" rx="3" /><path d="M9.5 16V8.5h3a2.5 2.5 0 0 1 0 5h-3" /></svg>
+const BoltIcon   = () => <svg {...iconBase} fill="currentColor" stroke="none"><path d="M13 2L4.5 13.5H11l-1 8.5L19.5 10H13z" /></svg>
+const TargetIcon = () => <svg {...iconBase}><circle cx="12" cy="12" r="8" /><circle cx="12" cy="12" r="2.5" fill="currentColor" stroke="none" /><path d="M12 2v3M12 19v3M2 12h3M19 12h3" /></svg>
+const ExitIcon   = () => <svg {...iconBase}><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h8" /><path d="M19 12H10" /><path d="M16 9l3 3-3 3" /></svg>
+const ReturnIcon = () => <svg {...iconBase}><path d="M9 14L4 9l5-5" /><path d="M4 9h11a5 5 0 0 1 5 5v6" /></svg>
+const CancelIcon = () => <svg {...iconBase}><path d="M6 6l12 12M18 6L6 18" /></svg>
+
 const SectionTitle = ({ children }: { children: React.ReactNode }) => (
   <div style={{ fontSize: 9, letterSpacing: 2, color: 'var(--text-muted)', textTransform: 'uppercase', margin: '10px 0 4px' }}>{children}</div>
 )
 
-const ActionBtn = ({ label, color, onClick, title }: { label: string; color: string; onClick: () => void; title?: string }) => (
+const ActionBtn = ({ icon, label, color, onClick, title }: { icon: ReactNode; label: string; color: string; onClick: () => void; title?: string }) => (
   <button onClick={onClick} title={title}
-    style={{ flex: '1 1 28%', minWidth: 56, padding: '5px 0', fontSize: 10, borderRadius: 2, cursor: 'pointer', fontFamily: 'Inter, "Noto Sans JP", sans-serif', fontWeight: 600, letterSpacing: 0.5,
-      color, border: `1px solid ${color}55`, background: color + '10' }}>
+    style={{ flex: '1 1 28%', minWidth: 56, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3,
+      padding: '6px 0', fontSize: 9, borderRadius: 4, cursor: 'pointer', fontFamily: 'Inter, "Noto Sans JP", sans-serif', fontWeight: 600, letterSpacing: 0.3,
+      color, border: `1px solid ${color}55`, background: color + '10', transition: 'background 120ms ease' }}
+    onMouseEnter={e => (e.currentTarget.style.background = color + '22')}
+    onMouseLeave={e => (e.currentTarget.style.background = color + '10')}>
+    {icon}
     {label}
   </button>
 )

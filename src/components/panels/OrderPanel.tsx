@@ -77,8 +77,14 @@ export function OrderPanel({ onManageStorage, sel, setSel, pickMode, onRequestPi
   const dropId  = sel.dropoff  || dropoffs[0]?.id  || ''
   const pAreaId = sel.pickArea || pickAreas[0]?.id || ''
   const dAreaId = sel.dropArea || dropAreas[0]?.id || ''
+  // can't pick from an EMPTY source nor deliver to a FULL destination (server also enforces);
+  // relevant when a map-pick selects a stock outside the default FULL/EMPTY lists
+  const pickStore = storages.find(s => s.id === pickId)
+  const dropStore = storages.find(s => s.id === dropId)
+  const pickBad = mode === 'single' && !!pickStore && pickStore.state !== 'FULL'
+  const dropBad = mode === 'single' && !!dropStore && dropStore.state !== 'EMPTY'
   const canCreate = !busy && canCommand && (mode === 'single'
-    ? (!!pickId && !!dropId && pickId !== dropId)
+    ? (!!pickId && !!dropId && pickId !== dropId && !pickBad && !dropBad)
     : (!!pAreaId && !!dAreaId))
 
   const create = async () => {
@@ -172,6 +178,8 @@ export function OrderPanel({ onManageStorage, sel, setSel, pickMode, onRequestPi
             border: '1px solid rgba(22,163,74,0.4)', background: 'rgba(22,163,74,0.08)', opacity: canCreate ? 1 : 0.4 }}>
           {busy ? '… CREATING' : mode === 'batch' ? '+ CREATE BATCH' : '+ CREATE MISSION'}
         </button>
+        {pickBad && <div style={{ fontSize: 9, color: '#dc2626' }}>Pickup {pickStore?.name} is EMPTY — nothing to pick up.</div>}
+        {dropBad && <div style={{ fontSize: 9, color: '#dc2626' }}>Dropoff {dropStore?.name} is FULL — no space to deliver.</div>}
         {err && <div style={{ fontSize: 9, color: '#dc2626' }}>{err}</div>}
         {!canCommand && <div style={{ fontSize: 9, color: 'var(--text-faint)' }}>Your role (VIEWER) is read-only — ask an OPERATOR or ADMIN to issue commands.</div>}
         {!storages.length && <div style={{ fontSize: 9, color: 'var(--text-faint)' }}>No storages yet — add some in the STORAGE tab.</div>}
@@ -272,7 +280,7 @@ function StorageSelect({ label, value, options, onChange, empty, onPick, picking
         <select value={value} onChange={e => onChange(e.target.value)}
           style={{ flex: 1, minWidth: 0, fontSize: 10, fontFamily: 'Roboto Mono', background: 'var(--surface-2)', color: 'var(--text)',
             border: '1px solid var(--border)', borderRadius: 2, padding: '3px 4px' }}>
-          {options.map(s => <option key={s.id} value={s.id}>{s.name} @ {s.nodeId}{s.state === 'FULL' ? ' ●' : ''}</option>)}
+          {options.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
         </select>
       ) : (
         <span style={{ flex: 1, fontSize: 9, color: 'var(--text-faint)', fontStyle: 'italic' }}>{empty}</span>

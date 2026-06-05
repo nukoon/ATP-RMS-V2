@@ -222,6 +222,9 @@ app.post('/api/storages', requireAuth, wrap(async (req, res) => {
   if (!name || !nodeId) return res.status(400).json({ error: 'name and nodeId required' })
   const [exists] = await pool.query('SELECT id FROM storage WHERE name = ? LIMIT 1', [name])
   if (exists[0]) return res.status(409).json({ error: 'storage name already exists' })
+  // one node can host at most ONE storage
+  const [nodeUsed] = await pool.query('SELECT name FROM storage WHERE node_id = ? LIMIT 1', [nodeId])
+  if (nodeUsed[0]) return res.status(409).json({ error: `node ${nodeId} already has a storage (${nodeUsed[0].name})` })
   const [r] = await pool.query(
     `INSERT INTO storage (name, node_id, area_id, kind, state, label, enabled)
      VALUES (?, ?, ?, ?, ?, ?, ?)`,
@@ -233,6 +236,10 @@ app.post('/api/storages', requireAuth, wrap(async (req, res) => {
 
 app.patch('/api/storages/:id', requireAuth, wrap(async (req, res) => {
   const { name, nodeId, kind, state, label, enabled, areaId } = req.body || {}
+  if (nodeId !== undefined) {
+    const [used] = await pool.query('SELECT name FROM storage WHERE node_id = ? AND id <> ? LIMIT 1', [nodeId, req.params.id])
+    if (used[0]) return res.status(409).json({ error: `node ${nodeId} already has a storage (${used[0].name})` })
+  }
   const sets = [], vals = []
   if (name !== undefined)    { sets.push('name = ?');    vals.push(name) }
   if (nodeId !== undefined)  { sets.push('node_id = ?'); vals.push(nodeId) }
@@ -543,10 +550,15 @@ app.post('/api/missions', requireAuth, requireRole('OPERATOR'), wrap(async (req,
   if (!pickupStorageId || !dropoffStorageId) return res.status(400).json({ error: 'pickupStorageId and dropoffStorageId required' })
   if (pickupStorageId === dropoffStorageId) return res.status(400).json({ error: 'pickup and dropoff must differ' })
 
-  const [stores] = await pool.query('SELECT id, name, node_id FROM storage WHERE id IN (?, ?)', [pickupStorageId, dropoffStorageId])
+  const [stores] = await pool.query('SELECT id, name, node_id, state, enabled FROM storage WHERE id IN (?, ?)', [pickupStorageId, dropoffStorageId])
   const pickup = stores.find(s => String(s.id) === String(pickupStorageId))
   const dropoff = stores.find(s => String(s.id) === String(dropoffStorageId))
   if (!pickup || !dropoff) return res.status(400).json({ error: 'unknown storage' })
+  if (!pickup.enabled)  return res.status(400).json({ error: `pickup ${pickup.name} is disabled` })
+  if (!dropoff.enabled) return res.status(400).json({ error: `dropoff ${dropoff.name} is disabled` })
+  // can't pick from an empty source, nor deliver to a full destination
+  if (pickup.state !== 'FULL')   return res.status(409).json({ error: `pickup ${pickup.name} is EMPTY — nothing to pick up` })
+  if (dropoff.state !== 'EMPTY') return res.status(409).json({ error: `dropoff ${dropoff.name} is FULL — no space to deliver` })
 
   res.status(201).json(await insertMission(pickup, dropoff, priority, actorOf(req)))
 }))

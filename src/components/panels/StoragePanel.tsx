@@ -13,7 +13,9 @@ import { NodePicker } from '@/components/NodePicker'
 export function StoragePanel({ onManage, onMultiAdd }: { onManage: () => void; onMultiAdd?: () => void }) {
   const { storages, areas, loaded, loadAll, addStorage, removeStorage, setState } = useStorageStore()
   const map = useFleetStore(s => s.map)
-  const nodes = (map?.points ?? []).filter(p => p.cls !== 'Charge')
+  // a node can host only ONE storage → offer only free (non-Charge) nodes
+  const usedNodes = new Set(storages.map(s => s.nodeId))
+  const nodes = (map?.points ?? []).filter(p => p.cls !== 'Charge' && !usedNodes.has(p.id))
 
   const [adding, setAdding] = useState(false)
   const [name, setName]   = useState('')

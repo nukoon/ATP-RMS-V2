@@ -51,7 +51,7 @@ export function useMapTransform(map: FleetMap | null) {
     const { w, h } = sizeRef.current
     if (!w || !h) return
     setTransform(t => {
-      const scale = Math.max(t.scale, 8)   // ensure a close-enough look
+      const scale = Math.max(t.scale, 8) * 1.5   // close look, then ~50% closer
       return { scale, offsetX: w / 2 - wx * scale, offsetY: h / 2 + wy * scale }   // Y-flip
     })
   }, [])
