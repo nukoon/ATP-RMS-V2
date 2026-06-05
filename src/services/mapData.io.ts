@@ -17,7 +17,7 @@ import { useStorageStore } from '@/store/storage.store'
 import { useConfigStore } from '@/store/config.store'
 import { useFleetStore } from '@/store/fleet.store'
 import type {
-  Storage, StorageArea, Dock, TrafficArea, VdaActionTemplate, StorageActionBinding,
+  Storage, StorageArea, Dock, TrafficArea, VdaActionTemplate, StorageActionBinding, FieldDevice,
 } from '@/types/fleet'
 
 export const MAP_DATA_FORMAT = 'atp-rms-map-data'
@@ -35,6 +35,7 @@ export interface MapDataDoc {
     templates: VdaActionTemplate[]
     bindings: Record<string, StorageActionBinding[]>   // storageId → bindings
     docks: Dock[]
+    devices: FieldDevice[]
     trafficAreas: TrafficArea[]
   }
 }
@@ -43,6 +44,7 @@ export interface ImportSummary {
   areas: number
   storages: number
   docks: number
+  devices: number
   trafficAreas: number
   templatesNew: number
   templatesReused: number
@@ -56,7 +58,7 @@ export interface ImportSummary {
 export async function buildMapDataExport(): Promise<MapDataDoc> {
   const st = useStorageStore.getState()
   if (!st.loaded) await st.loadAll()
-  const { storages, areas, docks, trafficAreas, templates } = useStorageStore.getState()
+  const { storages, areas, docks, devices, trafficAreas, templates } = useStorageStore.getState()
 
   const bindings: Record<string, StorageActionBinding[]> = {}
   await Promise.all(storages.map(async s => {
@@ -73,9 +75,9 @@ export async function buildMapDataExport(): Promise<MapDataDoc> {
     mapName,
     counts: {
       storages: storages.length, areas: areas.length, docks: docks.length,
-      trafficAreas: trafficAreas.length, templates: templates.length,
+      devices: devices.length, trafficAreas: trafficAreas.length, templates: templates.length,
     },
-    data: { areas, storages, templates, bindings, docks, trafficAreas },
+    data: { areas, storages, templates, bindings, docks, devices, trafficAreas },
   }
 }
 
@@ -117,20 +119,21 @@ export async function importMapData(doc: MapDataDoc): Promise<ImportSummary> {
   const checkNode = (id?: string | null) => { if (id && mapPoints.size && !mapPoints.has(id)) missing.add(id) }
 
   const summary: ImportSummary = {
-    areas: 0, storages: 0, docks: 0, trafficAreas: 0,
+    areas: 0, storages: 0, docks: 0, devices: 0, trafficAreas: 0,
     templatesNew: 0, templatesReused: 0, bindings: 0, overwritten: 0, missingNodes: [],
   }
 
   // fetch current rows fresh so we can match by name regardless of store staleness
-  const [exAreas, exStorages, exDocks, exTraffic, exTemplates] = await Promise.all([
-    api.listAreas().catch(() => []), api.listStorages().catch(() => []),
-    api.listDocks().catch(() => []), api.listTrafficAreas().catch(() => []),
-    api.listActions().catch(() => []),
+  const [exAreas, exStorages, exDocks, exTraffic, exTemplates, exDevices] = await Promise.all([
+    api.listAreas(mapId ?? undefined).catch(() => []), api.listStorages(mapId ?? undefined).catch(() => []),
+    api.listDocks(mapId ?? undefined).catch(() => []), api.listTrafficAreas(mapId ?? undefined).catch(() => []),
+    api.listActions().catch(() => []), api.listDevices(mapId ?? undefined).catch(() => []),
   ])
   const areaByName = new Map(exAreas.map(a => [a.name, a]))
   const storageByName = new Map(exStorages.map(s => [s.name, s]))
   const dockByName = new Map(exDocks.map(d2 => [d2.name, d2]))
   const trafficByName = new Map(exTraffic.map(z => [z.name, z]))
+  const deviceByName = new Map(exDevices.map(x => [x.name, x]))
 
   // 1) areas — upsert by name (old id → resolved id)
   const areaIdMap = new Map<string, string>()
@@ -203,7 +206,21 @@ export async function importMapData(doc: MapDataDoc): Promise<ImportSummary> {
     summary.docks++
   }
 
-  // 6) traffic zones — upsert by name
+  // 6) field devices — upsert by name
+  for (const dv of d.devices ?? []) {
+    checkNode(dv.nodeId)
+    const ex = deviceByName.get(dv.name)
+    if (ex) {
+      await api.updateDevice(ex.id, { type: dv.type, nodeId: dv.nodeId, state: dv.state ?? null, enabled: dv.enabled, config: dv.config ?? null })
+      summary.overwritten++
+    } else {
+      const c = await api.createDevice({ name: dv.name, type: dv.type, nodeId: dv.nodeId, state: dv.state ?? null, enabled: dv.enabled, config: dv.config ?? null, mapId })
+      deviceByName.set(c.name, c)
+    }
+    summary.devices++
+  }
+
+  // 7) traffic zones — upsert by name
   for (const z of d.trafficAreas ?? []) {
     (z.nodeIds ?? []).forEach(checkNode)
     const ex = trafficByName.get(z.name)

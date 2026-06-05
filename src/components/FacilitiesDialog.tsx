@@ -6,11 +6,13 @@
 import { useRef, useState } from 'react'
 import { useStorageStore } from '@/store/storage.store'
 import { useFleetStore } from '@/store/fleet.store'
-import type { DockType, TrafficArea } from '@/types/fleet'
+import type { DockType, TrafficArea, DeviceType } from '@/types/fleet'
+import { DEVICE_STATES } from '@/types/fleet'
 import { FLEET_ROSTER } from '@/constants/fleet-roster'
+import { NodePicker } from '@/components/NodePicker'
 import { downloadMapData, parseMapDataFile, importMapData } from '@/services/mapData.io'
 
-type Tab = 'docks' | 'traffic'
+type Tab = 'docks' | 'devices' | 'traffic'
 
 export function FacilitiesDialog({ onClose, onDrawTrafficArea, onEditTrafficZone }: { onClose: () => void; onDrawTrafficArea?: () => void; onEditTrafficZone?: (z: TrafficArea) => void }) {
   const [tab, setTab] = useState<Tab>('docks')
@@ -22,7 +24,7 @@ export function FacilitiesDialog({ onClose, onDrawTrafficArea, onEditTrafficZone
           <button onClick={onClose} style={{ marginLeft: 'auto', background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: 18 }}>×</button>
         </div>
         <div style={{ display: 'flex', borderBottom: '1px solid var(--border)' }}>
-          {([['docks', 'DOCKS (PARK / CHARGE)'], ['traffic', 'TRAFFIC AREAS']] as [Tab, string][]).map(([k, l]) => (
+          {([['docks', 'DOCKS'], ['devices', 'DEVICES'], ['traffic', 'TRAFFIC']] as [Tab, string][]).map(([k, l]) => (
             <button key={k} onClick={() => setTab(k)}
               style={{ flex: 1, padding: '8px 0', fontSize: 10, fontWeight: 600, letterSpacing: 1, cursor: 'pointer', fontFamily: 'Inter, "Noto Sans JP", sans-serif',
                 background: tab === k ? 'rgba(37,99,235,0.08)' : 'transparent', color: tab === k ? 'var(--accent)' : 'var(--text-muted)',
@@ -30,7 +32,7 @@ export function FacilitiesDialog({ onClose, onDrawTrafficArea, onEditTrafficZone
           ))}
         </div>
         <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: 14 }}>
-          {tab === 'docks' ? <DocksTab /> : <TrafficTab onDraw={onDrawTrafficArea} onEdit={onEditTrafficZone} />}
+          {tab === 'docks' ? <DocksTab /> : tab === 'devices' ? <DevicesTab /> : <TrafficTab onDraw={onDrawTrafficArea} onEdit={onEditTrafficZone} />}
         </div>
         <PortabilityBar />
       </div>
@@ -49,7 +51,7 @@ function PortabilityBar() {
     setErr(''); setMsg(''); setBusy(true)
     try {
       const doc = await downloadMapData()
-      setMsg(`Exported — ${doc.counts.storages} stock · ${doc.counts.areas} areas · ${doc.counts.docks} docks · ${doc.counts.trafficAreas} traffic`)
+      setMsg(`Exported — ${doc.counts.storages} stock · ${doc.counts.areas} areas · ${doc.counts.docks} docks · ${doc.counts.devices} devices · ${doc.counts.trafficAreas} traffic`)
     } catch (e) { setErr(e instanceof Error ? e.message : 'export failed') }
     finally { setBusy(false) }
   }
@@ -59,7 +61,7 @@ function PortabilityBar() {
     try {
       const doc = parseMapDataFile(await file.text())
       const s = await importMapData(doc)
-      let m = `Imported — ${s.storages} stock · ${s.areas} areas · ${s.docks} docks · ${s.trafficAreas} traffic · ${s.bindings} action(s)`
+      let m = `Imported — ${s.storages} stock · ${s.areas} areas · ${s.docks} docks · ${s.devices} devices · ${s.trafficAreas} traffic · ${s.bindings} action(s)`
       if (s.overwritten) m += ` (${s.overwritten} overwritten)`
       if (s.missingNodes.length) m += ` ⚠ ${s.missingNodes.length} node id(s) not on this map: ${s.missingNodes.slice(0, 5).join(', ')}${s.missingNodes.length > 5 ? '…' : ''}`
       setMsg(m)
@@ -143,6 +145,72 @@ function DocksTab() {
             <button onClick={() => removeDock(d.id).catch(() => {})} style={{ ...miniBtn, color: '#dc2626' }}>×</button>
           </div>
         ))}
+      </div>
+    </div>
+  )
+}
+
+// ── Field devices tab: doors / traffic lights / lifts / … at a map node ──
+const DEVICE_TYPES: DeviceType[] = ['DOOR', 'TRAFFIC_LIGHT', 'LIFT', 'CONVEYOR', 'GENERIC']
+const DEVICE_GLYPH: Record<DeviceType, string> = { DOOR: '🚪', TRAFFIC_LIGHT: '🚦', LIFT: '🛗', CONVEYOR: '⛓', GENERIC: '◆' }
+
+function DevicesTab() {
+  const { devices, addDevice, updateDevice, removeDevice } = useStorageStore()
+  const map = useFleetStore(s => s.map)
+  const nodeIds = (map?.points ?? []).map(p => p.id)
+
+  const [name, setName] = useState('')
+  const [type, setType] = useState<DeviceType>('DOOR')
+  const [node, setNode] = useState('')
+  const [err, setErr] = useState('')
+
+  const create = async () => {
+    const nodeId = node || nodeIds[0]
+    if (!name.trim() || !nodeId) return
+    setErr('')
+    try { await addDevice({ name: name.trim(), type, nodeId, state: DEVICE_STATES[type][0], enabled: true }); setName(''); setNode('') }
+    catch (e) { setErr(e instanceof Error ? e.message : 'failed') }
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, alignItems: 'end' }}>
+        <div><Lbl>Device name</Lbl><input value={name} onChange={e => setName(e.target.value)} placeholder="DOOR-1" style={inp} /></div>
+        <div><Lbl>Type</Lbl>
+          <select value={type} onChange={e => setType(e.target.value as DeviceType)} style={inp}>
+            {DEVICE_TYPES.map(t => <option key={t} value={t}>{DEVICE_GLYPH[t]} {t.replace('_', ' ')}</option>)}
+          </select>
+        </div>
+        <div style={{ gridColumn: '1 / -1', display: 'grid', gridTemplateColumns: '1fr auto', gap: 6, alignItems: 'end' }}>
+          <div><Lbl>Node</Lbl><NodePicker value={node} onChange={setNode} nodeIds={nodeIds} placeholder={`Node e.g. ${nodeIds[0] ?? 'LM1'}`} /></div>
+          <button onClick={create} style={primaryBtn}>+ ADD</button>
+        </div>
+      </div>
+      {err && <div style={{ fontSize: 10, color: '#dc2626' }}>{err}</div>}
+      <div style={{ fontSize: 9, color: 'var(--text-faint)', lineHeight: 1.5 }}>
+        Devices the fleet interacts with at a node (doors, traffic lights, lifts…). State is set manually for now —
+        the automatic <b>docking-signal</b> handshake (open/read/call) is planned and will use each device's config.
+      </div>
+
+      <div style={{ borderTop: '1px solid var(--border)', paddingTop: 8 }}>
+        <Lbl>Devices ({devices.length})</Lbl>
+        {devices.length === 0 && <div style={{ fontSize: 10, color: 'var(--text-faint)' }}>None yet — add a door / light / lift above.</div>}
+        {devices.map(d => {
+          const states = DEVICE_STATES[d.type] ?? ['OFF', 'ON']
+          const next = d.state === states[1] ? states[0] : states[1]
+          return (
+            <div key={d.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', borderBottom: '1px solid rgba(212,218,227,0.6)', fontSize: 11 }}>
+              <span style={{ width: 16, textAlign: 'center' }}>{DEVICE_GLYPH[d.type] ?? '◆'}</span>
+              <span style={{ fontFamily: 'Roboto Mono', color: 'var(--text)', width: 90, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={d.name}>{d.name}</span>
+              <span style={{ fontSize: 8, color: 'var(--text-muted)', flex: 1 }}>{d.type.replace('_', ' ')} · @{d.nodeId}</span>
+              <button onClick={() => updateDevice(d.id, { state: next }).catch(() => {})} title="Toggle state (manual)"
+                style={{ ...miniBtn, width: 60, color: ['OPEN', 'GREEN', 'ON'].includes((d.state || '').toUpperCase()) ? '#16a34a' : 'var(--text-2)' }}>{d.state ?? '—'}</button>
+              <button onClick={() => updateDevice(d.id, { enabled: !d.enabled }).catch(() => {})}
+                style={{ ...miniBtn, color: d.enabled ? '#16a34a' : 'var(--text-faint)' }}>{d.enabled ? 'ON' : 'OFF'}</button>
+              <button onClick={() => removeDevice(d.id).catch(() => {})} style={{ ...miniBtn, color: '#dc2626' }}>×</button>
+            </div>
+          )
+        })}
       </div>
     </div>
   )

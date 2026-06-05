@@ -9,6 +9,7 @@ import type { AmrConfig, VdaBrandId } from '@/types/fleet'
 import { VDA_BRANDS, VDA_BRAND_LIST } from '@/constants/vda-brands'
 import { useConfigStore } from '@/store/config.store'
 import { useAuthStore } from '@/store/auth.store'
+import { useFleetStore } from '@/store/fleet.store'
 import { ApiError } from '@/services/api'
 import { AGV_SPECS } from '@/constants/agv-specs'
 import { AGV_MODELS } from '@/constants'
@@ -157,16 +158,34 @@ function AmrRow({ a, updateAmr, removeAmr, onErr }: {
   removeAmr: (serial: string) => Promise<unknown>
   onErr: (e: unknown) => void
 }) {
+  const nodes = useFleetStore(s => s.map)?.points ?? []
   const [editing, setEditing] = useState(false)
   const [name, setName]   = useState(a.name)
   const [model, setModel] = useState<AgvModel>(a.model)
   const [brand, setBrand] = useState<VdaBrandId>(a.brand)
   const [ip, setIp]       = useState(a.ip)
+  const num = (v: number | null | undefined) => (v == null ? '' : String(v))
+  const [lowB, setLowB]       = useState(num(a.lowBattery))
+  const [resumeB, setResumeB] = useState(num(a.resumeBattery))
+  const [chargeT, setChargeT] = useState(num(a.chargeTarget))
+  const [parkN, setParkN]     = useState(a.parkNode ?? '')
+  const [chargeN, setChargeN] = useState(a.chargeNode ?? '')
 
-  const start = () => { setName(a.name); setModel(a.model); setBrand(a.brand); setIp(a.ip); setEditing(true) }
+  const start = () => {
+    setName(a.name); setModel(a.model); setBrand(a.brand); setIp(a.ip)
+    setLowB(num(a.lowBattery)); setResumeB(num(a.resumeBattery)); setChargeT(num(a.chargeTarget))
+    setParkN(a.parkNode ?? ''); setChargeN(a.chargeNode ?? ''); setEditing(true)
+  }
   const save = async () => {
-    try { await updateAmr(a.serial, { name: name.trim() || a.serial, model, brand, ip: ip.trim() }); setEditing(false) }
-    catch (e) { onErr(e) }
+    const n = (s: string) => (s.trim() === '' ? null : Math.max(1, Math.min(100, Number(s) || 0)))
+    try {
+      await updateAmr(a.serial, {
+        name: name.trim() || a.serial, model, brand, ip: ip.trim(),
+        lowBattery: n(lowB), resumeBattery: n(resumeB), chargeTarget: n(chargeT),
+        parkNode: parkN || null, chargeNode: chargeN || null,
+      })
+      setEditing(false)
+    } catch (e) { onErr(e) }
   }
 
   if (editing) return (
@@ -180,6 +199,30 @@ function AmrRow({ a, updateAmr, removeAmr, onErr }: {
       <select style={inputStyle} value={brand} onChange={e => setBrand(e.target.value as VdaBrandId)}>
         {VDA_BRAND_LIST.map(b => <option key={b.id} value={b.id}>{b.label}</option>)}
       </select>
+
+      {/* battery thresholds (% — blank = fleet default) */}
+      <div style={{ gridColumn: '1 / -1' }}><Label>Battery % — low / resume / charge-to (blank = default)</Label>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6 }}>
+          <input style={inputStyle} type="number" min={1} max={100} value={lowB}    onChange={e => setLowB(e.target.value)}    placeholder="low e.g.20" title="Go charge at/below this %" />
+          <input style={inputStyle} type="number" min={1} max={100} value={resumeB} onChange={e => setResumeB(e.target.value)} placeholder="resume e.g.30" title="May take jobs again at/above this %" />
+          <input style={inputStyle} type="number" min={1} max={100} value={chargeT} onChange={e => setChargeT(e.target.value)} placeholder="chargeTo e.g.90" title="Charge until this % then go park" />
+        </div>
+      </div>
+
+      {/* park + charge map nodes */}
+      <div><Label>Park node</Label>
+        <select style={inputStyle} value={parkN} onChange={e => setParkN(e.target.value)}>
+          <option value="">— default —</option>
+          {nodes.map(p => <option key={p.id} value={p.id}>{p.id}{p.cls === 'Charge' ? ' ⚡' : ''}</option>)}
+        </select>
+      </div>
+      <div><Label>Charge node</Label>
+        <select style={inputStyle} value={chargeN} onChange={e => setChargeN(e.target.value)}>
+          <option value="">— nearest —</option>
+          {nodes.map(p => <option key={p.id} value={p.id}>{p.id}{p.cls === 'Charge' ? ' ⚡' : ''}</option>)}
+        </select>
+      </div>
+
       <div style={{ gridColumn: '1 / -1', display: 'flex', gap: 6 }}>
         <button onClick={save} style={{ ...primaryBtn, flex: 1, padding: '4px 0' }}>SAVE</button>
         <button onClick={() => setEditing(false)}
@@ -218,22 +261,23 @@ function MapTab() {
     setErr('')
     try {
       const text = await file.text()
-      JSON.parse(text) // validate
-      addMap({ id: `map-${Date.now()}`, name: name.trim() || file.name.replace(/\.json$/i, ''), source: 'uploaded', data: text })
+      const obj = JSON.parse(text)
+      if (!Array.isArray(obj.advancedPointList)) { setErr('Not an ATP/SEER map (missing advancedPointList)'); return }
+      addMap({ id: `map-${Date.now()}`, name: name.trim() || file.name.replace(/\.(json|smap)$/i, ''), source: 'uploaded', data: text })
       setName('')
     } catch {
-      setErr('Invalid JSON file')
+      setErr('Invalid map file (not valid JSON)')
     }
   }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
       <div>
-        <Label>Add Map (ATP JSON — advancedPointList / advancedCurveList)</Label>
+        <Label>Add Map (ATP .json / SEER .smap — advancedPointList / advancedCurveList)</Label>
         <input style={{ ...inputStyle, marginBottom: 6 }} value={name} onChange={e => setName(e.target.value)} placeholder="Map name (optional)" />
         <label style={{ ...primaryBtn, display: 'inline-block' }}>
-          + UPLOAD JSON
-          <input type="file" accept=".json,application/json" style={{ display: 'none' }}
+          + UPLOAD MAP
+          <input type="file" accept=".json,.smap,application/json" style={{ display: 'none' }}
             onChange={e => { const f = e.target.files?.[0]; if (f) onFile(f) }} />
         </label>
         {err && <span style={{ marginLeft: 10, fontSize: 10, color: '#dc2626' }}>{err}</span>}

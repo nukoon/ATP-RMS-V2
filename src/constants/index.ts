@@ -66,6 +66,7 @@ export const DEFAULT_MAP_CONFIG = {
   showGrid: true,
   showRobots: true,
   showTraffic: true,
+  showDevices: true,
   nodeSize: 1,
   labelSize: 12,
   labelZoomThreshold: 1.0,

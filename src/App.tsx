@@ -78,7 +78,8 @@ export default function App() {
 
   // Load the operator's registered AMRs + storages + shared broker config on entry.
   useEffect(() => { loadAmrs().catch(err => console.error('[AMR] load failed', err)) }, [loadAmrs])
-  useEffect(() => { loadStorages().catch(err => console.error('[STORAGE] load failed', err)) }, [loadStorages])
+  // (re)load facility data scoped to the active map — also re-runs on map switch
+  useEffect(() => { loadStorages().catch(err => console.error('[STORAGE] load failed', err)) }, [loadStorages, activeMapId])
   useEffect(() => { loadBroker().catch(() => {}) }, [loadBroker])
 
   // load the active map (builtin URL or uploaded JSON) whenever it changes
@@ -115,6 +116,7 @@ export default function App() {
       })
     }
     mqttService.onStateUpdate((id, st) => useFleetStore.getState().updateFromVDA5050(id, st))
+    mqttService.onPathUpdate((id, path) => useFleetStore.getState().setRobotPath(id, path))   // live route → map
     mqttService.onConnectionChange((c) => useFleetStore.getState().setMqttConnected(c))
     mqttService.onRobotConnection((id, online) => console.log(`[MQTT] robot ${id} ${online ? 'ONLINE' : 'OFFLINE'}`))
     // each robot gets its own topic identity from its brand preset

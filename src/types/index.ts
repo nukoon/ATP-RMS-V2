@@ -85,13 +85,25 @@ export interface VDA5050State {
   lastNodeId: string
   lastNodeSequenceId: number
   driving: boolean
+  paused?: boolean
   agvPosition: AgvPose
   velocity: AgvVelocity
   batteryState: AgvBattery
   operatingMode: string
+  // remaining order graph the AGV still has to traverse (real robots send these);
+  // used to draw the live route on the map
+  nodeStates?: VDA5050NodeState[]
+  edgeStates?: { edgeId: string; sequenceId?: number; released?: boolean }[]
   errors: VDA5050Error[]
   warnings: VDA5050Warning[]
   safetyState: { fieldViolation: boolean; eStop: string }
+}
+
+export interface VDA5050NodeState {
+  nodeId: string
+  sequenceId?: number
+  released?: boolean
+  nodePosition?: { x: number; y: number; theta?: number; mapId?: string }
 }
 
 export interface VDA5050Error {
@@ -219,6 +231,7 @@ export interface MapViewConfig {
   showGrid: boolean            // background grid (2D + 3D)
   showRobots: boolean          // robot icons / models
   showTraffic: boolean         // traffic-zone node markers
+  showDevices: boolean         // field-device markers (doors / lights / lifts…)
   nodeSize: number             // px
   labelSize: number            // px
   labelZoomThreshold: number   // show labels when zoom >= this

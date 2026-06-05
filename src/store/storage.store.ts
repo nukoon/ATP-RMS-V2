@@ -6,20 +6,26 @@
  */
 import { create } from 'zustand'
 import { api } from '@/services/api'
+import { useConfigStore } from '@/store/config.store'
 import type {
-  Storage, StorageState, StorageArea, Dock, TrafficArea, VdaActionTemplate, StorageActionBinding,
+  Storage, StorageState, StorageArea, Dock, TrafficArea, VdaActionTemplate, StorageActionBinding, FieldDevice,
 } from '@/types/fleet'
 
 interface StorageStore {
   storages: Storage[]
   areas: StorageArea[]
   docks: Dock[]
+  devices: FieldDevice[]
   trafficAreas: TrafficArea[]
   templates: VdaActionTemplate[]
   bindings: Record<string, StorageActionBinding[]>  // storageId → bindings
   loaded: boolean
 
   loadAll: () => Promise<void>
+
+  addDevice:    (d: Partial<FieldDevice>) => Promise<FieldDevice>
+  updateDevice: (id: string, patch: Partial<FieldDevice>) => Promise<void>
+  removeDevice: (id: string) => Promise<void>
 
   addTrafficArea:    (a: Partial<TrafficArea>) => Promise<TrafficArea>
   updateTrafficArea: (id: string, patch: Partial<TrafficArea>) => Promise<void>
@@ -47,10 +53,14 @@ interface StorageStore {
   saveBindings: (storageId: string, bindings: StorageActionBinding[]) => Promise<void>
 }
 
+// the active map a new facility entity belongs to
+const curMap = () => useConfigStore.getState().activeMapId
+
 export const useStorageStore = create<StorageStore>((set, get) => ({
   storages: [],
   areas: [],
   docks: [],
+  devices: [],
   trafficAreas: [],
   templates: [],
   bindings: {},
@@ -58,18 +68,32 @@ export const useStorageStore = create<StorageStore>((set, get) => ({
 
   loadAll: async () => {
     // Resilient load: a single missing/failing endpoint (e.g. an older backend
-    // without /traffic-areas) must NOT blank out the others. Each falls back to
-    // an empty list independently.
+    // without /devices) must NOT blank out the others. Each falls back to []
     const safe = async <T,>(p: Promise<T[]>): Promise<T[]> => p.catch(() => [])
-    const [storages, templates, areas, docks, trafficAreas] = await Promise.all([
-      safe(api.listStorages()), safe(api.listActions()), safe(api.listAreas()),
-      safe(api.listDocks()), safe(api.listTrafficAreas()),
+    const mapId = useConfigStore.getState().activeMapId   // facility data is scoped per map
+    const [storages, templates, areas, docks, trafficAreas, devices] = await Promise.all([
+      safe(api.listStorages(mapId)), safe(api.listActions()), safe(api.listAreas(mapId)),
+      safe(api.listDocks(mapId)), safe(api.listTrafficAreas(mapId)), safe(api.listDevices(mapId)),
     ])
-    set({ storages, templates, areas, docks, trafficAreas, loaded: true })
+    set({ storages, templates, areas, docks, trafficAreas, devices, loaded: true })
+  },
+
+  addDevice: async (d) => {
+    const created = await api.createDevice({ ...d, mapId: d.mapId ?? curMap() })
+    set(st => ({ devices: [...st.devices, created] }))
+    return created
+  },
+  updateDevice: async (id, patch) => {
+    const updated = await api.updateDevice(id, patch)
+    set(st => ({ devices: st.devices.map(x => x.id === id ? updated : x) }))
+  },
+  removeDevice: async (id) => {
+    await api.deleteDevice(id)
+    set(st => ({ devices: st.devices.filter(x => x.id !== id) }))
   },
 
   addTrafficArea: async (a) => {
-    const created = await api.createTrafficArea(a)
+    const created = await api.createTrafficArea({ ...a, mapId: a.mapId ?? curMap() })
     set(st => ({ trafficAreas: [...st.trafficAreas, created].sort((x, y) => x.name.localeCompare(y.name)) }))
     return created
   },
@@ -83,7 +107,7 @@ export const useStorageStore = create<StorageStore>((set, get) => ({
   },
 
   addStorage: async (s) => {
-    const created = await api.createStorage(s)
+    const created = await api.createStorage({ ...s, mapId: s.mapId ?? curMap() })
     set(st => ({ storages: [...st.storages, created].sort((a, b) => a.name.localeCompare(b.name)) }))
     return created
   },
@@ -103,7 +127,7 @@ export const useStorageStore = create<StorageStore>((set, get) => ({
   },
 
   addArea: async (a) => {
-    const created = await api.createArea(a)
+    const created = await api.createArea({ ...a, mapId: a.mapId ?? curMap() })
     set(st => ({ areas: [...st.areas, created].sort((x, y) => x.name.localeCompare(y.name)) }))
     return created
   },
@@ -129,7 +153,7 @@ export const useStorageStore = create<StorageStore>((set, get) => ({
   },
 
   addDock: async (d) => {
-    const created = await api.createDock(d)
+    const created = await api.createDock({ ...d, mapId: d.mapId ?? curMap() })
     set(st => ({ docks: [...st.docks, created] }))
     return created
   },

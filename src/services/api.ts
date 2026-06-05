@@ -5,7 +5,7 @@
  */
 import { useAuthStore } from '@/store/auth.store'
 import type {
-  AmrConfig, SysUser, Storage, StorageArea, Dock, TrafficArea, VdaActionTemplate, StorageActionBinding, Mission,
+  AmrConfig, SysUser, Storage, StorageArea, Dock, TrafficArea, VdaActionTemplate, StorageActionBinding, Mission, FieldDevice,
 } from '@/types/fleet'
 
 export class ApiError extends Error {
@@ -81,8 +81,8 @@ export const api = {
   deleteAmr: (serial: string) =>
     request<{ ok: true }>(`/amrs/${encodeURIComponent(serial)}`, { method: 'DELETE' }),
 
-  // Storage areas
-  listStorages: () => request<Storage[]>('/storages'),
+  // Storage areas (mapId scopes facility data to the active map)
+  listStorages: (mapId?: string) => request<Storage[]>(`/storages${mapId ? `?mapId=${encodeURIComponent(mapId)}` : ''}`),
   createStorage: (s: Partial<Storage>) => request<Storage>('/storages', { method: 'POST', body: JSON.stringify(s) }),
   updateStorage: (id: string, patch: Partial<Storage>) =>
     request<Storage>(`/storages/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(patch) }),
@@ -90,7 +90,7 @@ export const api = {
     request<{ ok: true }>(`/storages/${encodeURIComponent(id)}`, { method: 'DELETE' }),
 
   // Storage areas (batch grouping)
-  listAreas: () => request<StorageArea[]>('/areas'),
+  listAreas: (mapId?: string) => request<StorageArea[]>(`/areas${mapId ? `?mapId=${encodeURIComponent(mapId)}` : ''}`),
   createArea: (a: Partial<StorageArea>) => request<StorageArea>('/areas', { method: 'POST', body: JSON.stringify(a) }),
   updateArea: (id: string, patch: Partial<StorageArea>) =>
     request<StorageArea>(`/areas/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(patch) }),
@@ -98,15 +98,23 @@ export const api = {
     request<{ ok: true }>(`/areas/${encodeURIComponent(id)}`, { method: 'DELETE' }),
 
   // Docks (parking & charging points)
-  listDocks: () => request<Dock[]>('/docks'),
+  listDocks: (mapId?: string) => request<Dock[]>(`/docks${mapId ? `?mapId=${encodeURIComponent(mapId)}` : ''}`),
   createDock: (d: Partial<Dock>) => request<Dock>('/docks', { method: 'POST', body: JSON.stringify(d) }),
   updateDock: (id: string, patch: Partial<Dock>) =>
     request<Dock>(`/docks/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(patch) }),
   deleteDock: (id: string) =>
     request<{ ok: true }>(`/docks/${encodeURIComponent(id)}`, { method: 'DELETE' }),
 
+  // Field devices (doors / traffic lights / lifts / …)
+  listDevices: (mapId?: string) => request<FieldDevice[]>(`/devices${mapId ? `?mapId=${encodeURIComponent(mapId)}` : ''}`),
+  createDevice: (d: Partial<FieldDevice>) => request<FieldDevice>('/devices', { method: 'POST', body: JSON.stringify(d) }),
+  updateDevice: (id: string, patch: Partial<FieldDevice>) =>
+    request<FieldDevice>(`/devices/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+  deleteDevice: (id: string) =>
+    request<{ ok: true }>(`/devices/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+
   // Traffic areas (mutual-exclusion zones)
-  listTrafficAreas: () => request<TrafficArea[]>('/traffic-areas'),
+  listTrafficAreas: (mapId?: string) => request<TrafficArea[]>(`/traffic-areas${mapId ? `?mapId=${encodeURIComponent(mapId)}` : ''}`),
   createTrafficArea: (a: Partial<TrafficArea>) => request<TrafficArea>('/traffic-areas', { method: 'POST', body: JSON.stringify(a) }),
   updateTrafficArea: (id: string, patch: Partial<TrafficArea>) =>
     request<TrafficArea>(`/traffic-areas/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(patch) }),

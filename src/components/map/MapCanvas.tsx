@@ -4,7 +4,7 @@
  */
 import { useEffect, useRef, useCallback, useState, type ReactNode } from 'react'
 import type { FleetMap, Robot, MapViewConfig, MapPoint } from '@/types'
-import type { Storage, Dock, StorageArea, TrafficArea } from '@/types/fleet'
+import type { Storage, Dock, StorageArea, TrafficArea, FieldDevice } from '@/types/fleet'
 import type { Transform } from '@/utils/canvas'
 import { worldToScreen, screenToWorld, thetaToScreenRot } from '@/utils/canvas'
 import { STATUS_COLOR, AGV_ASSET_PATH } from '@/constants'
@@ -78,6 +78,9 @@ export function MapCanvas({ map, robots, config, selectedRobotId, onRobotClick, 
   const docks = useStorageStore(s => s.docks)
   const docksRef = useRef<Dock[]>(docks)
   docksRef.current = docks
+  const devices = useStorageStore(s => s.devices)
+  const devicesRef = useRef<FieldDevice[]>(devices)
+  devicesRef.current = devices
   const areas = useStorageStore(s => s.areas)
   const areasRef = useRef<StorageArea[]>(areas)
   areasRef.current = areas
@@ -146,6 +149,7 @@ export function MapCanvas({ map, robots, config, selectedRobotId, onRobotClick, 
     if (config.showStorage) drawAreas(ctx, map, areasRef.current, storagesRef.current, tt, config)
     drawNodes(ctx, map, tt, config, storageNodes)
     if (config.showStorage) drawDocks(ctx, map, docksRef.current, tt)
+    if (config.showDevices) drawDevices(ctx, map, devicesRef.current, tt)
     if (config.showStorage) drawStorages(ctx, map, storagesRef.current, occupiedRef.current, tt, config)
     if (config.showRobots) {
       const interp = interpRef.current
@@ -659,6 +663,51 @@ function drawDocks(ctx: CanvasRenderingContext2D, map: FleetMap, docks: Dock[], 
       ctx.fillStyle = getCanvas().labelBg; ctx.fillRect(sx - lw / 2 - 2, ly - Math.max(8, sz * 0.34), lw + 4, Math.max(10, sz * 0.4))
       ctx.fillStyle = col; ctx.fillText(d.agvId, sx, ly)
     }
+  }
+}
+
+// FIELD DEVICES: peripherals at a node (door / traffic light / lift / …). A
+// rounded badge with a type glyph, ringed in a colour reflecting its state
+// (go/open/on = green, stop/closed = red, off/idle = grey).
+const DEVICE_M = 1.0
+const DEVICE_GLYPH: Record<string, string> = { DOOR: '🚪', TRAFFIC_LIGHT: '🚦', LIFT: '🛗', CONVEYOR: '⛓', GENERIC: '◆' }
+function deviceStateColor(state: string | null | undefined): string {
+  const s = (state || '').toUpperCase()
+  if (s === 'OPEN' || s === 'GREEN' || s === 'ON') return '#16a34a'
+  if (s === 'OFF' || s === 'IDLE') return '#94a3b4'
+  if (s === 'CLOSED' || s === 'RED' || s === 'BUSY') return '#dc2626'
+  return '#7c3aed'
+}
+function drawDevices(ctx: CanvasRenderingContext2D, map: FleetMap, devices: FieldDevice[], t: Transform) {
+  const sz = Math.max(13, DEVICE_M * t.scale)
+  const half = sz / 2, rad = sz * 0.28
+  for (const d of devices) {
+    if (!d.enabled) continue
+    const node = map.points.find(p => p.id === d.nodeId)
+    if (!node) continue
+    const { sx, sy } = worldToScreen(node.x, node.y, t)
+    const col = deviceStateColor(d.state)
+    // white badge + state-coloured ring so it reads over lanes/nodes
+    ctx.save()
+    ctx.shadowColor = 'rgba(0,0,0,0.25)'; ctx.shadowBlur = 4; ctx.shadowOffsetY = 1
+    ctx.beginPath(); ctx.roundRect(sx - half, sy - half, sz, sz, rad)
+    ctx.fillStyle = getCanvas().labelBg; ctx.fill()
+    ctx.restore()
+    ctx.beginPath(); ctx.roundRect(sx - half, sy - half, sz, sz, rad)
+    ctx.strokeStyle = col; ctx.lineWidth = Math.max(1.4, sz * 0.1); ctx.stroke()
+    // type glyph
+    ctx.fillStyle = col; ctx.font = `${sz * 0.6}px "Noto Sans JP", sans-serif`
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
+    ctx.fillText(DEVICE_GLYPH[d.type] ?? '◆', sx, sy + 0.5)
+    ctx.textBaseline = 'alphabetic'
+    // name + state label below
+    const lblPx = Math.max(8, sz * 0.32)
+    ctx.font = `bold ${lblPx}px Roboto Mono, "Noto Sans JP", monospace`
+    const label = `${d.name}${d.state ? ' · ' + d.state : ''}`
+    const lw = ctx.measureText(label).width
+    const ly = sy + half + lblPx + 2
+    ctx.fillStyle = getCanvas().labelBg; ctx.fillRect(sx - lw / 2 - 2, ly - lblPx, lw + 4, lblPx + 3)
+    ctx.fillStyle = col; ctx.fillText(label, sx, ly)
   }
 }
 

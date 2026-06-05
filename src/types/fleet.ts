@@ -96,6 +96,30 @@ export interface TrafficArea {
   enabled: boolean
 }
 
+// ── Field devices: peripherals at a map node (doors, traffic lights, lifts…) ──
+// Foundation only — the docking-signal handshake is not designed yet (→ config).
+export type DeviceType = 'DOOR' | 'TRAFFIC_LIGHT' | 'LIFT' | 'CONVEYOR' | 'GENERIC'
+
+export interface FieldDevice {
+  id: string
+  name: string
+  type: DeviceType
+  nodeId: string              // bound map node id
+  state?: string | null       // device-dependent (OPEN/CLOSED, RED/GREEN, ON/OFF…)
+  config?: Record<string, unknown> | null   // reserved: future signal integration
+  mapId?: string | null
+  enabled: boolean
+}
+
+// per-type two states (for the manual toggle + map colour); first = "clear/idle"
+export const DEVICE_STATES: Record<DeviceType, [string, string]> = {
+  DOOR:          ['CLOSED', 'OPEN'],
+  TRAFFIC_LIGHT: ['RED', 'GREEN'],
+  LIFT:          ['IDLE', 'BUSY'],
+  CONVEYOR:      ['OFF', 'ON'],
+  GENERIC:       ['OFF', 'ON'],
+}
+
 // ── Docks: parking & charging points (optionally bound to a robot) ──
 export type DockType = 'PARK' | 'CHARGE'
 
@@ -173,6 +197,12 @@ export interface AmrConfig {
   ip: string              // robot IP (reference / per-robot broker host)
   enabled: boolean        // include when connecting
   brand: VdaBrandId       // robot vendor → its VDA5050 topic scheme + manufacturer
+  // operational thresholds (null = use fleet defaults)
+  lowBattery?: number | null     // % at/below which it must go charge
+  resumeBattery?: number | null  // % at/above which it may take jobs again
+  chargeTarget?: number | null   // charge until this % then return to park
+  parkNode?: string | null       // map node it parks at (home)
+  chargeNode?: string | null     // map node it charges at (else nearest charge dock)
 }
 
 // A user-added map (ATP JSON), stored locally and switchable.

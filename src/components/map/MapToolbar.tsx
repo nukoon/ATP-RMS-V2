@@ -91,7 +91,7 @@ function ToolButton({ icon, label, onClick, title, accent = false, active = fals
 }
 
 // boolean (show/hide) layer toggles, collected under one "Display" dropdown
-type BoolKey = 'showLM' | 'showAP' | 'showCH' | 'showEdges' | 'showPaths' | 'showTheta' | 'showStorage' | 'showHeatmap' | 'showGrid' | 'showRobots' | 'showTraffic'
+type BoolKey = 'showLM' | 'showAP' | 'showCH' | 'showEdges' | 'showPaths' | 'showTheta' | 'showStorage' | 'showHeatmap' | 'showGrid' | 'showRobots' | 'showTraffic' | 'showDevices'
 const DISPLAY_LAYERS: { key: BoolKey; label: string }[] = [
   { key: 'showLM',      label: 'Location Marks (LM)' },
   { key: 'showAP',      label: 'Action Points (AP)' },
@@ -102,6 +102,7 @@ const DISPLAY_LAYERS: { key: BoolKey; label: string }[] = [
   { key: 'showTheta',   label: 'θ Direction' },
   { key: 'showStorage', label: 'Storage / Docks' },
   { key: 'showTraffic', label: 'Traffic Zones' },
+  { key: 'showDevices', label: 'Field Devices' },
   { key: 'showHeatmap', label: 'Traffic Heatmap' },
   { key: 'showGrid',    label: 'Grid' },
 ]

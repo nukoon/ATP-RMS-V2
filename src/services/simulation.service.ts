@@ -12,6 +12,7 @@
 import type { FleetMap, MapPoint, MapCurve, AgvModel, AgvStatus, VDA5050State, VDA5050Error } from '@/types'
 import { useFleetStore } from '@/store/fleet.store'
 import { useStorageStore } from '@/store/storage.store'
+import { useConfigStore } from '@/store/config.store'
 import { calcTheta } from '@/utils/canvas'
 import { speedMaxOf } from '@/constants/agv-specs'
 import { FLEET_ROSTER } from '@/constants/fleet-roster'
@@ -29,6 +30,10 @@ interface SimBot {
   id: string
   model: AgvModel
   mps: number              // top speed m/s
+  loBat: number            // go charge at/below this %
+  resumeBat: number        // resume taking jobs at/above this %
+  chargeTo: number         // charge until this % then return to park
+  chargeNode: string | null// preferred charge node (else nearest)
   homeNode: string         // parking (charge) node id
   node: string             // node the bot currently sits on / departed from
   route: MapCurve[]        // remaining edges to traverse
@@ -60,7 +65,9 @@ interface SimBot {
 const ACTION_DWELL_MS = 2500   // time spent running PICK/DROP actions at a station
 
 const TICK_MS = 100
-const LOW_BATTERY = 20
+const LOW_BATTERY = 20            // default: go charge at/below this %
+const RESUME_BATTERY = 30         // default: may take jobs again at/above this %
+const CHARGE_TARGET = 90          // default: charge until this % then go park
 const FAULT_CHANCE = 0.0004
 const TRAFFIC_RADIUS = 3.0         // m: separation zone (geometric backstop)
 const DEADLOCK_TICKS = 25          // ~2.5s blocked → try to reroute around the blocker
@@ -319,10 +326,22 @@ export class SimulationService {
     }
 
     const store = useFleetStore.getState()
+    const amrs = useConfigStore.getState().amrs   // per-AMR operational overrides (by id)
     this.bots = plan.map((p) => {
-      const home = this.nodes.get(p.homeNode) ?? map.points[0]
+      const cfg = amrs.find(a => a.serial === p.id)
+      // park node: AMR override (if it's a real map node) else the planned home
+      const parkId = (cfg?.parkNode && this.nodes.has(cfg.parkNode)) ? cfg.parkNode : p.homeNode
+      const home = this.nodes.get(parkId) ?? map.points[0]
+      // preferred charge node (must exist on the map); also make it chargeable
+      const chargeNode = (cfg?.chargeNode && this.nodes.has(cfg.chargeNode)) ? cfg.chargeNode : null
+      if (chargeNode) this.chargeNodes.add(chargeNode)
+      const loBat = cfg?.lowBattery ?? LOW_BATTERY
       const bot: SimBot = {
         id: p.id, model: p.model, mps: speedMaxOf(p.model),
+        loBat,
+        resumeBat: cfg?.resumeBattery ?? Math.max(RESUME_BATTERY, loBat),
+        chargeTo: cfg?.chargeTarget ?? CHARGE_TARGET,
+        chargeNode,
         homeNode: home.id, node: home.id,
         route: [], edge: null, t: 0, phase: 'PARKED', missionId: null,
         pickupNode: '', dropoffNode: '', pickupStorageId: null, dropoffStorageId: null,
@@ -377,7 +396,7 @@ export class SimulationService {
         b.paused = false; b.left = false
         this.requeueMission(store, b)
         this.releaseReservationsExcept(b, new Set([b.node]))
-        const cn = this.nearestChargeNode(b.node)
+        const cn = (b.chargeNode && this.chargeNodes.has(b.chargeNode)) ? b.chargeNode : this.nearestChargeNode(b.node)
         const path = cn ? this.shortestPath(b.node, cn) : null
         if (path && path.length) { b.route = path; b.edge = path[0]; b.t = 0; b.phase = 'TO_CHARGE'; b.status = 'EXECUTING' }
         else { b.route = []; b.edge = null; b.phase = 'PARKED'; b.status = 'CHARGING' }   // already on a charge node
@@ -447,7 +466,7 @@ export class SimulationService {
       // enough). A returning bot is grabbed mid-trip without reversing: it
       // finishes the edge it's on, then turns toward the pickup.
       const free = this.bots.filter(b =>
-        (b.phase === 'PARKED' || b.phase === 'TO_HOME') && !b.missionId && !b.fault && b.battery > LOW_BATTERY)
+        (b.phase === 'PARKED' || b.phase === 'TO_HOME') && !b.missionId && !b.fault && b.battery >= b.resumeBat)
       if (!free.length) return  // all busy → leave PENDING for later
 
       // choose the free bot with the cheapest route to the pickup, measured from
@@ -495,7 +514,7 @@ export class SimulationService {
   private sendHome(b: SimBot) {
     const path = this.shortestPath(b.node, b.homeNode)
     if (path && path.length) { b.route = path; b.edge = path[0]; b.t = 0; b.phase = 'TO_HOME'; b.status = 'EXECUTING' }
-    else { b.route = []; b.edge = null; b.phase = 'PARKED'; b.status = b.battery < LOW_BATTERY ? 'CHARGING' : 'IDLE' }
+    else { b.route = []; b.edge = null; b.phase = 'PARKED'; b.status = b.battery < b.loBat ? 'CHARGING' : 'IDLE' }
   }
 
   // ── traffic: node reservation + deadlock reroute ─────────
@@ -614,10 +633,10 @@ export class SimulationService {
         const onCharge = this.chargeNodes.has(b.node)
         if (onCharge) {
           b.battery = Math.min(100, b.battery + 0.15)
-          b.status = b.battery < 99 ? 'CHARGING' : 'IDLE'
-          if (b.battery >= 99 && b.node !== b.homeNode) this.sendHome(b)  // done charging → go park
-        } else if (b.battery < LOW_BATTERY) {
-          const cn = this.nearestChargeNode(b.node)
+          b.status = b.battery < b.chargeTo ? 'CHARGING' : 'IDLE'
+          if (b.battery >= b.chargeTo && b.node !== b.homeNode) this.sendHome(b)  // charged to target → go park
+        } else if (b.battery < b.loBat) {
+          const cn = (b.chargeNode && this.chargeNodes.has(b.chargeNode)) ? b.chargeNode : this.nearestChargeNode(b.node)
           const path = cn ? this.shortestPath(b.node, cn) : null
           if (path && path.length) { b.route = path; b.edge = path[0]; b.t = 0; b.phase = 'TO_CHARGE'; b.status = 'EXECUTING' }
           else b.status = 'IDLE'
@@ -680,10 +699,10 @@ export class SimulationService {
       }
 
       // low-battery alarm
-      if (b.battery < LOW_BATTERY && !b.lowBatt) {
+      if (b.battery < b.loBat && !b.lowBatt) {
         b.lowBatt = true
         store.pushAlarm({ id: uid(), agvId: b.id, code: 'BAT_LOW', level: 'WARNING', message: `Battery low (${Math.round(b.battery)}%)`, status: 'ACTIVE', createdAt: new Date().toISOString() })
-      } else if (b.battery >= LOW_BATTERY && b.lowBatt) { b.lowBatt = false; this.resolveAlarmFor(store, b.id, 'BAT_LOW') }
+      } else if (b.battery >= b.loBat && b.lowBatt) { b.lowBatt = false; this.resolveAlarmFor(store, b.id, 'BAT_LOW') }
 
       this.report(store, b, now)
     }
@@ -707,7 +726,7 @@ export class SimulationService {
       b.phase = 'PARKED'
       const node = this.nodeById(b.node)
       if (node) { b.pos = { x: node.x, y: node.y }; b.theta = this.parkHeading(node.id) }
-      b.status = this.chargeNodes.has(b.node) && b.battery < 99 ? 'CHARGING' : 'IDLE'
+      b.status = this.chargeNodes.has(b.node) && b.battery < b.chargeTo ? 'CHARGING' : 'IDLE'
     }
   }
 

@@ -31,7 +31,7 @@ const wrap = (fn) => (req, res) => fn(req, res).catch((err) => {
 // ── multi-user sync: bump a global revision after every successful change to
 // shared data, so other clients can poll /api/sync and auto-refresh. One place
 // (res 'finish') instead of sprinkling calls through every mutating handler.
-const SYNC_PATHS = /^\/api\/(storages|areas|docks|traffic-areas|actions|missions|config)/
+const SYNC_PATHS = /^\/api\/(storages|areas|docks|devices|traffic-areas|actions|missions|config)/
 async function bumpSync(req) {
   const who = (req.user && (req.user.realName || req.user.username)) || null
   const scope = (req.path.split('/')[2] || 'data').replace('traffic-areas', 'traffic')
@@ -43,6 +43,9 @@ app.use((req, res, next) => {
   }
   next()
 })
+
+// Optional ?mapId= filter so facility data is scoped to a single map.
+const mapWhere = (req) => req.query.mapId ? { sql: ' WHERE map_id = ?', args: [req.query.mapId] } : { sql: '', args: [] }
 
 // ── health ────────────────────────────────────────────────
 app.get('/api/health', wrap(async (_req, res) => {
@@ -183,11 +186,18 @@ app.put('/api/config/:key', requireAuth, requireRole('OPERATOR'), wrap(async (re
 
 // ── AMRs (backed by the `agv` table joined to `agv_type`) ──
 const SELECT_AMR =
-  `SELECT a.sn AS serial, a.name, t.code AS model, a.color, a.brand, a.ip, a.enabled
+  `SELECT a.sn AS serial, a.name, t.code AS model, a.color, a.brand, a.ip, a.enabled,
+          a.low_battery, a.resume_battery, a.charge_target, a.park_node, a.charge_node
      FROM agv a JOIN agv_type t ON a.agv_type_id = t.id`
 
+const numOrNull = (v) => (v === null || v === undefined || v === '' ? null : Number(v))
 function rowToAmr(r) {
-  return { serial: r.serial, name: r.name, model: r.model, color: r.color, brand: r.brand || 'aiten', ip: r.ip || '', enabled: !!r.enabled }
+  return {
+    serial: r.serial, name: r.name, model: r.model, color: r.color, brand: r.brand || 'aiten',
+    ip: r.ip || '', enabled: !!r.enabled,
+    lowBattery: r.low_battery, resumeBattery: r.resume_battery, chargeTarget: r.charge_target,
+    parkNode: r.park_node || null, chargeNode: r.charge_node || null,
+  }
 }
 
 app.get('/api/amrs', requireAuth, wrap(async (_req, res) => {
@@ -196,7 +206,7 @@ app.get('/api/amrs', requireAuth, wrap(async (_req, res) => {
 }))
 
 app.post('/api/amrs', requireAuth, wrap(async (req, res) => {
-  const { serial, name, model, color, brand, ip, enabled } = req.body || {}
+  const { serial, name, model, color, brand, ip, enabled, lowBattery, resumeBattery, chargeTarget, parkNode, chargeNode } = req.body || {}
   if (!serial || !model) return res.status(400).json({ error: 'serial and model required' })
 
   const [types] = await pool.query('SELECT id FROM agv_type WHERE code = ? LIMIT 1', [model])
@@ -206,9 +216,10 @@ app.post('/api/amrs', requireAuth, wrap(async (req, res) => {
   if (exists[0]) return res.status(409).json({ error: 'serial already registered' })
 
   await pool.query(
-    `INSERT INTO agv (sn, name, agv_type_id, color, brand, ip, enabled, status)
-     VALUES (?, ?, ?, ?, ?, ?, ?, 'OFFLINE')`,
-    [serial, name || serial, types[0].id, color || '#00d4ff', brand || 'aiten', ip || null, enabled === false ? 0 : 1],
+    `INSERT INTO agv (sn, name, agv_type_id, color, brand, ip, enabled, low_battery, resume_battery, charge_target, park_node, charge_node, status)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'OFFLINE')`,
+    [serial, name || serial, types[0].id, color || '#00d4ff', brand || 'aiten', ip || null, enabled === false ? 0 : 1,
+     numOrNull(lowBattery), numOrNull(resumeBattery), numOrNull(chargeTarget), parkNode || null, chargeNode || null],
   )
   const [rows] = await pool.query(`${SELECT_AMR} WHERE a.sn = ?`, [serial])
   res.status(201).json(rowToAmr(rows[0]))
@@ -216,7 +227,7 @@ app.post('/api/amrs', requireAuth, wrap(async (req, res) => {
 
 app.patch('/api/amrs/:sn', requireAuth, wrap(async (req, res) => {
   const sn = req.params.sn
-  const { name, model, color, brand, ip, enabled } = req.body || {}
+  const { name, model, color, brand, ip, enabled, lowBattery, resumeBattery, chargeTarget, parkNode, chargeNode } = req.body || {}
   const sets = []
   const vals = []
   if (name !== undefined)  { sets.push('name = ?');  vals.push(name) }
@@ -224,6 +235,11 @@ app.patch('/api/amrs/:sn', requireAuth, wrap(async (req, res) => {
   if (brand !== undefined) { sets.push('brand = ?'); vals.push(brand || 'aiten') }
   if (ip !== undefined)    { sets.push('ip = ?');    vals.push(ip || null) }
   if (enabled !== undefined) { sets.push('enabled = ?'); vals.push(enabled ? 1 : 0) }
+  if (lowBattery !== undefined)    { sets.push('low_battery = ?');    vals.push(numOrNull(lowBattery)) }
+  if (resumeBattery !== undefined) { sets.push('resume_battery = ?'); vals.push(numOrNull(resumeBattery)) }
+  if (chargeTarget !== undefined)  { sets.push('charge_target = ?');  vals.push(numOrNull(chargeTarget)) }
+  if (parkNode !== undefined)      { sets.push('park_node = ?');      vals.push(parkNode || null) }
+  if (chargeNode !== undefined)    { sets.push('charge_node = ?');    vals.push(chargeNode || null) }
   if (model !== undefined) {
     const [types] = await pool.query('SELECT id FROM agv_type WHERE code = ? LIMIT 1', [model])
     if (!types[0]) return res.status(400).json({ error: `unknown model: ${model}` })
@@ -255,23 +271,24 @@ function rowToStorage(r) {
   }
 }
 
-app.get('/api/storages', requireAuth, wrap(async (_req, res) => {
-  const [rows] = await pool.query('SELECT * FROM storage ORDER BY name')
+app.get('/api/storages', requireAuth, wrap(async (req, res) => {
+  const w = mapWhere(req)
+  const [rows] = await pool.query(`SELECT * FROM storage${w.sql} ORDER BY name`, w.args)
   res.json(rows.map(rowToStorage))
 }))
 
 app.post('/api/storages', requireAuth, wrap(async (req, res) => {
-  const { name, nodeId, kind, state, label, enabled, areaId } = req.body || {}
+  const { name, nodeId, kind, state, label, enabled, areaId, mapId } = req.body || {}
   if (!name || !nodeId) return res.status(400).json({ error: 'name and nodeId required' })
-  const [exists] = await pool.query('SELECT id FROM storage WHERE name = ? LIMIT 1', [name])
-  if (exists[0]) return res.status(409).json({ error: 'storage name already exists' })
-  // one node can host at most ONE storage
-  const [nodeUsed] = await pool.query('SELECT name FROM storage WHERE node_id = ? LIMIT 1', [nodeId])
+  // name + node uniqueness are scoped to the map (different maps are independent)
+  const [exists] = await pool.query('SELECT id FROM storage WHERE name = ? AND map_id <=> ? LIMIT 1', [name, mapId || null])
+  if (exists[0]) return res.status(409).json({ error: 'storage name already exists on this map' })
+  const [nodeUsed] = await pool.query('SELECT name FROM storage WHERE node_id = ? AND map_id <=> ? LIMIT 1', [nodeId, mapId || null])
   if (nodeUsed[0]) return res.status(409).json({ error: `node ${nodeId} already has a storage (${nodeUsed[0].name})` })
   const [r] = await pool.query(
-    `INSERT INTO storage (name, node_id, area_id, kind, state, label, enabled)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    [name, nodeId, areaId || null, kind || 'BOTH', state || 'EMPTY', label || null, enabled === false ? 0 : 1],
+    `INSERT INTO storage (name, node_id, area_id, kind, state, label, enabled, map_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    [name, nodeId, areaId || null, kind || 'BOTH', state || 'EMPTY', label || null, enabled === false ? 0 : 1, mapId || null],
   )
   const [rows] = await pool.query('SELECT * FROM storage WHERE id = ?', [r.insertId])
   res.status(201).json(rowToStorage(rows[0]))
@@ -280,7 +297,9 @@ app.post('/api/storages', requireAuth, wrap(async (req, res) => {
 app.patch('/api/storages/:id', requireAuth, wrap(async (req, res) => {
   const { name, nodeId, kind, state, label, enabled, areaId } = req.body || {}
   if (nodeId !== undefined) {
-    const [used] = await pool.query('SELECT name FROM storage WHERE node_id = ? AND id <> ? LIMIT 1', [nodeId, req.params.id])
+    const [used] = await pool.query(
+      'SELECT name FROM storage WHERE node_id = ? AND id <> ? AND map_id <=> (SELECT map_id FROM storage WHERE id = ?) LIMIT 1',
+      [nodeId, req.params.id, req.params.id])
     if (used[0]) return res.status(409).json({ error: `node ${nodeId} already has a storage (${used[0].name})` })
   }
   const sets = [], vals = []
@@ -314,19 +333,20 @@ function rowToArea(r) {
   }
 }
 
-app.get('/api/areas', requireAuth, wrap(async (_req, res) => {
-  const [rows] = await pool.query('SELECT * FROM storage_area ORDER BY name')
+app.get('/api/areas', requireAuth, wrap(async (req, res) => {
+  const w = mapWhere(req)
+  const [rows] = await pool.query(`SELECT * FROM storage_area${w.sql} ORDER BY name`, w.args)
   res.json(rows.map(rowToArea))
 }))
 
 app.post('/api/areas', requireAuth, wrap(async (req, res) => {
-  const { name, kind, enabled } = req.body || {}
+  const { name, kind, enabled, mapId } = req.body || {}
   if (!name) return res.status(400).json({ error: 'name required' })
-  const [exists] = await pool.query('SELECT id FROM storage_area WHERE name = ? LIMIT 1', [name])
-  if (exists[0]) return res.status(409).json({ error: 'area name already exists' })
+  const [exists] = await pool.query('SELECT id FROM storage_area WHERE name = ? AND map_id <=> ? LIMIT 1', [name, mapId || null])
+  if (exists[0]) return res.status(409).json({ error: 'area name already exists on this map' })
   const [r] = await pool.query(
-    'INSERT INTO storage_area (name, kind, enabled) VALUES (?, ?, ?)',
-    [name, kind || 'BOTH', enabled === false ? 0 : 1],
+    'INSERT INTO storage_area (name, kind, enabled, map_id) VALUES (?, ?, ?, ?)',
+    [name, kind || 'BOTH', enabled === false ? 0 : 1, mapId || null],
   )
   const [rows] = await pool.query('SELECT * FROM storage_area WHERE id = ?', [r.insertId])
   res.status(201).json(rowToArea(rows[0]))
@@ -363,17 +383,18 @@ function rowToDock(r) {
   }
 }
 
-app.get('/api/docks', requireAuth, wrap(async (_req, res) => {
-  const [rows] = await pool.query('SELECT * FROM dock ORDER BY type, name')
+app.get('/api/docks', requireAuth, wrap(async (req, res) => {
+  const w = mapWhere(req)
+  const [rows] = await pool.query(`SELECT * FROM dock${w.sql} ORDER BY type, name`, w.args)
   res.json(rows.map(rowToDock))
 }))
 
 app.post('/api/docks', requireAuth, wrap(async (req, res) => {
-  const { name, nodeId, type, agvId, enabled } = req.body || {}
+  const { name, nodeId, type, agvId, enabled, mapId } = req.body || {}
   if (!name || !nodeId) return res.status(400).json({ error: 'name and nodeId required' })
   const [r] = await pool.query(
-    'INSERT INTO dock (name, node_id, type, agv_id, enabled) VALUES (?, ?, ?, ?, ?)',
-    [name, nodeId, type || 'PARK', agvId || null, enabled === false ? 0 : 1],
+    'INSERT INTO dock (name, node_id, type, agv_id, enabled, map_id) VALUES (?, ?, ?, ?, ?, ?)',
+    [name, nodeId, type || 'PARK', agvId || null, enabled === false ? 0 : 1, mapId || null],
   )
   const [rows] = await pool.query('SELECT * FROM dock WHERE id = ?', [r.insertId])
   res.status(201).json(rowToDock(rows[0]))
@@ -401,6 +422,57 @@ app.delete('/api/docks/:id', requireAuth, wrap(async (req, res) => {
   res.json({ ok: true })
 }))
 
+// ── Field devices (doors / traffic lights / lifts / … bound to a map node) ──
+function rowToDevice(r) {
+  let config = null
+  if (r.config != null) { try { config = typeof r.config === 'string' ? JSON.parse(r.config) : r.config } catch { config = null } }
+  return {
+    id: String(r.id), name: r.name, type: r.type, nodeId: r.node_id,
+    state: r.state || null, config,
+    mapId: r.map_id != null ? String(r.map_id) : null, enabled: !!r.enabled,
+  }
+}
+
+app.get('/api/devices', requireAuth, wrap(async (req, res) => {
+  const w = mapWhere(req)
+  const [rows] = await pool.query(`SELECT * FROM field_device${w.sql} ORDER BY type, name`, w.args)
+  res.json(rows.map(rowToDevice))
+}))
+
+app.post('/api/devices', requireAuth, requireRole('OPERATOR'), wrap(async (req, res) => {
+  const { name, type, nodeId, state, enabled, config, mapId } = req.body || {}
+  if (!name || !nodeId) return res.status(400).json({ error: 'name and nodeId required' })
+  const [r] = await pool.query(
+    'INSERT INTO field_device (name, type, node_id, state, config, enabled, map_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    [name, type || 'DOOR', nodeId, state || null, config ? JSON.stringify(config) : null, enabled === false ? 0 : 1, mapId || null],
+  )
+  const [rows] = await pool.query('SELECT * FROM field_device WHERE id = ?', [r.insertId])
+  res.status(201).json(rowToDevice(rows[0]))
+}))
+
+app.patch('/api/devices/:id', requireAuth, requireRole('OPERATOR'), wrap(async (req, res) => {
+  const { name, type, nodeId, state, enabled, config } = req.body || {}
+  const sets = [], vals = []
+  if (name !== undefined)    { sets.push('name = ?');    vals.push(name) }
+  if (type !== undefined)    { sets.push('type = ?');    vals.push(type) }
+  if (nodeId !== undefined)  { sets.push('node_id = ?'); vals.push(nodeId) }
+  if (state !== undefined)   { sets.push('state = ?');   vals.push(state || null) }
+  if (enabled !== undefined) { sets.push('enabled = ?'); vals.push(enabled ? 1 : 0) }
+  if (config !== undefined)  { sets.push('config = ?');  vals.push(config ? JSON.stringify(config) : null) }
+  if (!sets.length) return res.status(400).json({ error: 'nothing to update' })
+  vals.push(req.params.id)
+  const [r] = await pool.query(`UPDATE field_device SET ${sets.join(', ')} WHERE id = ?`, vals)
+  if (!r.affectedRows) return res.status(404).json({ error: 'not found' })
+  const [rows] = await pool.query('SELECT * FROM field_device WHERE id = ?', [req.params.id])
+  res.json(rowToDevice(rows[0]))
+}))
+
+app.delete('/api/devices/:id', requireAuth, requireRole('OPERATOR'), wrap(async (req, res) => {
+  const [r] = await pool.query('DELETE FROM field_device WHERE id = ?', [req.params.id])
+  if (!r.affectedRows) return res.status(404).json({ error: 'not found' })
+  res.json({ ok: true })
+}))
+
 // ── Traffic areas (operator-defined mutual-exclusion zones) ──
 function rowToTrafficArea(r) {
   return {
@@ -409,19 +481,20 @@ function rowToTrafficArea(r) {
   }
 }
 
-app.get('/api/traffic-areas', requireAuth, wrap(async (_req, res) => {
-  const [rows] = await pool.query('SELECT * FROM traffic_area ORDER BY name')
+app.get('/api/traffic-areas', requireAuth, wrap(async (req, res) => {
+  const w = mapWhere(req)
+  const [rows] = await pool.query(`SELECT * FROM traffic_area${w.sql} ORDER BY name`, w.args)
   res.json(rows.map(rowToTrafficArea))
 }))
 
 app.post('/api/traffic-areas', requireAuth, wrap(async (req, res) => {
-  const { name, nodeIds, capacity, enabled } = req.body || {}
+  const { name, nodeIds, capacity, enabled, mapId } = req.body || {}
   if (!name || !Array.isArray(nodeIds) || !nodeIds.length) return res.status(400).json({ error: 'name and nodeIds required' })
-  const [exists] = await pool.query('SELECT id FROM traffic_area WHERE name = ? LIMIT 1', [name])
-  if (exists[0]) return res.status(409).json({ error: 'traffic area name already exists' })
+  const [exists] = await pool.query('SELECT id FROM traffic_area WHERE name = ? AND map_id <=> ? LIMIT 1', [name, mapId || null])
+  if (exists[0]) return res.status(409).json({ error: 'traffic area name already exists on this map' })
   const [r] = await pool.query(
-    'INSERT INTO traffic_area (name, node_ids, capacity, enabled) VALUES (?, ?, ?, ?)',
-    [name, JSON.stringify(nodeIds), capacity || 1, enabled === false ? 0 : 1],
+    'INSERT INTO traffic_area (name, node_ids, capacity, enabled, map_id) VALUES (?, ?, ?, ?, ?)',
+    [name, JSON.stringify(nodeIds), capacity || 1, enabled === false ? 0 : 1, mapId || null],
   )
   const [rows] = await pool.query('SELECT * FROM traffic_area WHERE id = ?', [r.insertId])
   res.status(201).json(rowToTrafficArea(rows[0]))
