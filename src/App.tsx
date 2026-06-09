@@ -14,7 +14,7 @@ import { mqttService } from '@/services/mqtt.service'
 import { ConfigDialog } from '@/components/ConfigDialog'
 import { FleetSidebar } from '@/components/sidebar/FleetSidebar'
 import { MetricsPanel } from '@/components/panels/MetricsPanel'
-import { RobotDetail }  from '@/components/panels/RobotDetail'
+import { RobotDetail, type RobotAction }  from '@/components/panels/RobotDetail'
 import { OrderPanel }   from '@/components/panels/OrderPanel'
 import { StoragePanel } from '@/components/panels/StoragePanel'
 import { StorageDialog } from '@/components/StorageDialog'
@@ -30,8 +30,38 @@ import { useThemeStore } from '@/store/theme.store'
 import { StatusBar }    from '@/components/StatusBar'
 import { useMapTransform } from '@/hooks/useMapTransform'
 import { VDA_BRANDS } from '@/constants/vda-brands'
+import { buildInstantActions } from '@/services/order.service'
+import type { VDA5050State } from '@/types'
+import type { AlarmLevel } from '@/types/fleet'
 
 type RightTab = 'missions' | 'storage'
+
+const alarmUid = () => Math.random().toString(36).slice(2, 10)
+
+// Surface live VDA5050 errors as alarms. The simulator already pushes alarms for
+// its faults, but the live path only stored `errors` on the robot — so an erroring
+// real robot showed status ERROR with an empty ALARMS panel (no detail). Push each
+// active error (pushAlarm de-dups by agvId+code) and resolve alarms whose error cleared.
+function syncLiveAlarms(
+  store: ReturnType<typeof useFleetStore.getState>,
+  agvId: string,
+  errors: VDA5050State['errors'],
+) {
+  const errs = errors || []
+  const codes = new Set(errs.map(e => e.errorType))
+  for (const e of errs) {
+    store.pushAlarm({
+      id: alarmUid(), agvId, code: e.errorType,
+      level: (e.errorLevel === 'WARNING' ? 'WARNING' : 'FATAL') as AlarmLevel,
+      message: e.errorDescription || e.errorType,
+      status: 'ACTIVE', createdAt: new Date().toISOString(),
+    })
+  }
+  // auto-resolve this robot's active alarms once the robot stops reporting them
+  for (const a of store.alarms) {
+    if (a.agvId === agvId && a.status === 'ACTIVE' && !codes.has(a.code)) store.resolveAlarm(a.id)
+  }
+}
 
 export default function App() {
   const { map, setMap, robots, metrics, mapConfig, setMapConfig, selectedRobotId, setSelectedRobotId, mqttConnected } = useFleetStore()
@@ -98,6 +128,27 @@ export default function App() {
     else { simulationService.start(map); setSimOn(true) }
   }
 
+  // Map a RobotDetail quick action to a VDA5050 instantAction and publish it to the
+  // live robot (manufacturer comes from the AMR's brand preset). Actions with no
+  // VDA5050 equivalent (PARK/LEAVE/RETURN) are ignored in live mode.
+  const sendLiveAction = (robotId: string, a: RobotAction) => {
+    const map: Partial<Record<RobotAction, string>> = {
+      PAUSE: 'startPause', RESUME: 'stopPause', CANCEL: 'cancelOrder',
+      CHARGE: 'startCharging', CLEAR_ERR: 'cancelOrder',
+    }
+    const actionType = map[a]
+    if (!actionType) return
+    const amr = amrs.find(x => x.serial === robotId)
+    const mfr = (VDA_BRANDS[amr?.brand ?? 'aiten'] ?? VDA_BRANDS.aiten).manufacturer
+    mqttService.sendInstantActions(robotId, buildInstantActions(robotId, mfr, [{ actionType }]))
+    // CLEAR_ERR / CANCEL: also clear this robot's dashboard alarms now (they re-appear
+    // on the next state if the robot still reports the fault).
+    if (a === 'CLEAR_ERR' || a === 'CANCEL') {
+      const fs = useFleetStore.getState()
+      fs.alarms.forEach(al => { if (al.agvId === robotId && al.status === 'ACTIVE') fs.resolveAlarm(al.id) })
+    }
+  }
+
   // Connect to a real broker and stream the enabled AMRs
   const toggleLive = () => {
     if (live) { mqttService.disconnect(); useFleetStore.getState().setMqttConnected(false); setLive(false); return }
@@ -115,7 +166,11 @@ export default function App() {
         errors: [], totalDistance: 0, lastUpdated: Date.now(), mqttConnected: false,
       })
     }
-    mqttService.onStateUpdate((id, st) => useFleetStore.getState().updateFromVDA5050(id, st))
+    mqttService.onStateUpdate((id, st) => {
+      const fs = useFleetStore.getState()
+      fs.updateFromVDA5050(id, st)
+      syncLiveAlarms(fs, id, st.errors)        // live errors → ALARMS panel
+    })
     mqttService.onPathUpdate((id, path) => useFleetStore.getState().setRobotPath(id, path))   // live route → map
     mqttService.onConnectionChange((c) => useFleetStore.getState().setMqttConnected(c))
     mqttService.onRobotConnection((id, online) => console.log(`[MQTT] robot ${id} ${online ? 'ONLINE' : 'OFFLINE'}`))
@@ -350,7 +405,10 @@ export default function App() {
               onClose={() => setSelectedRobotId(null)}
               onAction={(a) => {
                 if (a === 'VIEW') { ctrl.centerOnWorld(selectedRobot.pose.x, selectedRobot.pose.y); return }
-                simulationService.command(selectedRobot.id, a)
+                // LIVE: map quick actions to VDA5050 instantActions for the real robot;
+                // otherwise drive the simulator. (PARK/LEAVE/RETURN are sim-only concepts.)
+                if (mqttConnected) sendLiveAction(selectedRobot.id, a)
+                else if (a !== 'CLEAR_ERR') simulationService.command(selectedRobot.id, a)
               }}
             />
           ) : (

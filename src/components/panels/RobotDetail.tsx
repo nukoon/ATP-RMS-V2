@@ -4,7 +4,7 @@ import { STATUS_COLOR, STATUS_LABEL, AGV_ASSET_PATH } from '@/constants'
 import { AGV_SPECS } from '@/constants/agv-specs'
 import { colorOf } from '@/constants/fleet-roster'
 
-export type RobotAction = 'PAUSE' | 'RESUME' | 'CANCEL' | 'PARK' | 'CHARGE' | 'VIEW' | 'LEAVE' | 'RETURN'
+export type RobotAction = 'PAUSE' | 'RESUME' | 'CANCEL' | 'PARK' | 'CHARGE' | 'VIEW' | 'LEAVE' | 'RETURN' | 'CLEAR_ERR'
 
 interface Props {
   robot: Robot
@@ -106,7 +106,9 @@ export function RobotDetail({ robot: r, onClose, onAction }: Props) {
         <ActionBtn icon={isAway ? <ReturnIcon /> : <ExitIcon />} label={isAway ? 'Return' : 'Leave'} color={isAway ? '#16a34a' : '#7c3aed'}
           onClick={() => onAction(isAway ? 'RETURN' : 'LEAVE')}
           title={isAway ? 'Bring the robot back onto the map' : 'Temporarily remove from the map so another AGV can pass a deadlock'} />
-        <ActionBtn icon={<CancelIcon />} label="Cancel" color="#dc2626" onClick={() => onAction('CANCEL')} />
+        <ActionBtn icon={<CancelIcon />} label="Cancel" color="#dc2626" onClick={() => onAction('CANCEL')} title="cancelOrder — clear the robot's current task (VDA5050 instantAction)" />
+        <ActionBtn icon={<ClearErrIcon />} label="Clear Err" color="#ea7a00" onClick={() => onAction('CLEAR_ERR')}
+          title="Recover from a fault: sends cancelOrder to drop the failed task and clears this robot's alarms. A persistent hardware fault must be cleared at the robot HMI." />
       </div>
     </div>
   )
@@ -122,6 +124,7 @@ const TargetIcon = () => <svg {...iconBase}><circle cx="12" cy="12" r="8" /><cir
 const ExitIcon   = () => <svg {...iconBase}><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h8" /><path d="M19 12H10" /><path d="M16 9l3 3-3 3" /></svg>
 const ReturnIcon = () => <svg {...iconBase}><path d="M9 14L4 9l5-5" /><path d="M4 9h11a5 5 0 0 1 5 5v6" /></svg>
 const CancelIcon = () => <svg {...iconBase}><path d="M6 6l12 12M18 6L6 18" /></svg>
+const ClearErrIcon = () => <svg {...iconBase}><path d="M3 6h18" /><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /></svg>
 
 const SectionTitle = ({ children }: { children: React.ReactNode }) => (
   <div style={{ fontSize: 9, letterSpacing: 2, color: 'var(--text-muted)', textTransform: 'uppercase', margin: '10px 0 4px' }}>{children}</div>

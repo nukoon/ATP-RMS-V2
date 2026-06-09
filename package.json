@@ -9,9 +9,12 @@
     "preview": "vite preview",
     "lint": "eslint src --ext ts,tsx --report-unused-disable-directives",
     "type-check": "tsc --noEmit",
-    "server": "node server/index.js"
+    "server": "node server/index.js",
+    "seer-bridge": "node server/seer-bridge.js --relay",
+    "seer-bridge:poll": "node server/seer-bridge.js --poll"
   },
   "dependencies": {
+    "aedes": "^1.0.2",
     "bcryptjs": "^2.4.3",
     "clsx": "^2.1.0",
     "cors": "^2.8.5",

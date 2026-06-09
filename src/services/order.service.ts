@@ -64,3 +64,35 @@ export function buildVda5050Order(
     edges,
   }
 }
+
+export interface InstantActionSpec {
+  actionType: string
+  blockingType?: 'NONE' | 'SOFT' | 'HARD'
+  actionParameters?: { key: string; value: unknown }[]
+}
+
+/**
+ * Build a VDA5050 v2.0 instantActions message (topic `…/instantActions`). Used for
+ * out-of-order commands the AITEN-S / SEER RoboVDA gateway maps to RBK calls:
+ * cancelOrder→CLEARTARGETLIST, startPause/stopPause→TASK_PAUSE/RESUME,
+ * startCharging/stopCharging→SetDO (manual §5). v2.0 carries them under `actions`.
+ */
+export function buildInstantActions(
+  robotId: string,
+  manufacturer: string,
+  actions: InstantActionSpec[],
+) {
+  return {
+    headerId: headerCounter++,
+    timestamp: new Date().toISOString(),
+    version: VDA5050_VERSION,
+    manufacturer,
+    serialNumber: robotId,
+    actions: actions.map(a => ({
+      actionType: a.actionType,
+      actionId: uid(),
+      blockingType: a.blockingType ?? 'NONE',
+      actionParameters: a.actionParameters ?? [],
+    })),
+  }
+}
