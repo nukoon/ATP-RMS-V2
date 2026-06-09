@@ -1,7 +1,7 @@
 import type { AgvModel, AgvStatus, VDA5050Topic } from '@/types'
 
 // ── VDA5050 MQTT ──
-export const VDA5050_VERSION = '2.0'
+export const VDA5050_VERSION = '2.0'   // SEER/RoboVDA on-site expects '2.0' (its state reports 'V2'); '2.0.0' was not navigated
 export const MQTT_BASE_TOPIC = 'uagv/v2'   // uagv/v2/{manufacturer}/{serial}/{topic}
 export const MQTT_QOS = 1
 

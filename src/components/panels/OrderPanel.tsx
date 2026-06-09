@@ -42,6 +42,7 @@ export function OrderPanel({ onManageStorage, sel, setSel, pickMode, onRequestPi
   const cancelMission = useFleetStore(s => s.cancelMission)
   const updateMission = useFleetStore(s => s.updateMission)
   const map         = useFleetStore(s => s.map)
+  const robots      = useFleetStore(s => s.robots)
   const mqttConnected = useFleetStore(s => s.mqttConnected)
   const storages    = useStorageStore(s => s.storages)
   const amrs        = useConfigStore(s => s.amrs)
@@ -100,7 +101,7 @@ export function OrderPanel({ onManageStorage, sel, setSel, pickMode, onRequestPi
           addMission(m)
           if (mqttConnected) {
             const target = amrs.find(a => a.enabled)
-            if (target) mqttService.sendOrder(target.serial, buildVda5050Order(target.serial, mfrOf(target), m, map))
+            if (target) mqttService.sendOrder(target.serial, buildVda5050Order(target.serial, mfrOf(target), m, map, robots.get(target.serial)?.currentNodeId))
           }
         }
         setSel(s => ({ ...s, pickArea: undefined, dropArea: undefined })); onRequestPick(null)
@@ -110,7 +111,7 @@ export function OrderPanel({ onManageStorage, sel, setSel, pickMode, onRequestPi
         // LIVE: publish a VDA5050 Order (with the resolved PICK/DROP actions) to a real robot
         if (mqttConnected) {
           const target = amrs.find(a => a.enabled)
-          if (target) mqttService.sendOrder(target.serial, buildVda5050Order(target.serial, mfrOf(target), m, map))
+          if (target) mqttService.sendOrder(target.serial, buildVda5050Order(target.serial, mfrOf(target), m, map, robots.get(target.serial)?.currentNodeId))
         }
         setSel(s => ({ ...s, pickup: undefined, dropoff: undefined })); onRequestPick(null)
       }

@@ -13,10 +13,13 @@ const radToDeg = (r: number) => (r * 180) / Math.PI
 // Derive our UI status from the raw VDA5050 state (operatingMode alone is
 // AUTOMATIC/MANUAL/… — not a fleet status).
 function deriveStatus(raw: Record<string, unknown>): AgvStatus {
-  const errors = raw.errors as unknown[] | undefined
+  const errors = raw.errors as { errorLevel?: string }[] | undefined
   const safety = raw.safetyState as { eStop?: string } | undefined
   const battery = raw.batteryState as { charging?: boolean } | undefined
-  if (errors && errors.length) return 'ERROR'
+  // Only a FATAL error (or an e-stop) is a hard ERROR. WARNING-level errors —
+  // transient "blocked" / "slipping" cautions a real robot streams while still
+  // driving — must NOT flip the status to ERROR, or the badge flickers red.
+  if (errors && errors.some(e => e?.errorLevel === 'FATAL')) return 'ERROR'
   if (safety && safety.eStop && safety.eStop !== 'NONE') return 'ERROR'
   if (battery && battery.charging) return 'CHARGING'
   if (raw.paused) return 'PAUSE'

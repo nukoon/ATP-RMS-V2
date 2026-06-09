@@ -121,7 +121,8 @@ export interface VDA5050Warning {
 
 // ── Robot (UI model) ──────────────────────────────────────
 export interface Robot {
-  id: string                   // e.g. "AMR-001"
+  id: string                   // runtime id = VDA5050 serialNumber (topic segment)
+  name?: string                // operator display name (falls back to id when unset)
   model: AgvModel
   color?: string               // identity colour (status-independent) for map/path
   status: AgvStatus

@@ -47,12 +47,15 @@ function syncLiveAlarms(
   agvId: string,
   errors: VDA5050State['errors'],
 ) {
-  const errs = errors || []
-  const codes = new Set(errs.map(e => e.errorType))
-  for (const e of errs) {
+  // Only FATAL errors become alarms — transient WARNING cautions (slipping/blocked)
+  // a real robot streams while driving would otherwise churn the ALARMS list. The
+  // full error list (incl. warnings) is still shown in RobotDetail.
+  const fatal = (errors || []).filter(e => e.errorLevel === 'FATAL')
+  const codes = new Set(fatal.map(e => e.errorType))
+  for (const e of fatal) {
     store.pushAlarm({
       id: alarmUid(), agvId, code: e.errorType,
-      level: (e.errorLevel === 'WARNING' ? 'WARNING' : 'FATAL') as AlarmLevel,
+      level: 'FATAL' as AlarmLevel,
       message: e.errorDescription || e.errorType,
       status: 'ACTIVE', createdAt: new Date().toISOString(),
     })
@@ -158,7 +161,7 @@ export default function App() {
     const store = useFleetStore.getState()
     for (const a of enabled) {
       store.upsertRobot({
-        id: a.serial, model: a.model, color: a.color, status: 'UNKNOWN',
+        id: a.serial, name: a.name, model: a.model, color: a.color, status: 'UNKNOWN',
         pose: { x: 0, y: 0, theta: 0, mapId: 'live' },
         battery: { batteryCharge: 0, charging: false },
         velocity: { vx: 0, vy: 0, omega: 0 },
@@ -402,6 +405,7 @@ export default function App() {
           {selectedRobot ? (
             <RobotDetail
               robot={selectedRobot}
+              live={mqttConnected}
               onClose={() => setSelectedRobotId(null)}
               onAction={(a) => {
                 if (a === 'VIEW') { ctrl.centerOnWorld(selectedRobot.pose.x, selectedRobot.pose.y); return }

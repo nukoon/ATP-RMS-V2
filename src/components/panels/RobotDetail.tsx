@@ -10,6 +10,7 @@ interface Props {
   robot: Robot
   onClose: () => void
   onAction: (action: RobotAction) => void
+  live?: boolean   // connected to a real broker → hide sim-only actions (Park/Leave/Return)
 }
 
 const Field = ({ label, value, color }: { label: string; value: string; color?: string }) => (
@@ -19,7 +20,7 @@ const Field = ({ label, value, color }: { label: string; value: string; color?: 
   </div>
 )
 
-export function RobotDetail({ robot: r, onClose, onAction }: Props) {
+export function RobotDetail({ robot: r, onClose, onAction, live }: Props) {
   const col    = STATUS_COLOR[r.status]
   const spec   = AGV_SPECS[r.model]
   const idCol  = colorOf(r.id)
@@ -34,8 +35,8 @@ export function RobotDetail({ robot: r, onClose, onAction }: Props) {
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', borderBottom: '1px solid var(--border)', background: 'rgba(37,99,235,0.04)' }}>
         <span style={{ width: 8, height: 8, borderRadius: '50%', background: idCol, boxShadow: `0 0 6px ${idCol}`, flexShrink: 0 }} />
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontFamily: 'Roboto Mono', fontSize: 12, color: 'var(--accent)' }}>{r.id}</div>
-          <div style={{ fontSize: 9, color: 'var(--text-muted)' }}>{r.model}</div>
+          <div style={{ fontFamily: 'Roboto Mono', fontSize: 12, color: 'var(--accent)' }}>{r.name || r.id}</div>
+          <div style={{ fontSize: 9, color: 'var(--text-muted)' }}>{r.model}{r.name && r.name !== r.id ? ` · ${r.id}` : ''}</div>
         </div>
         <span style={{ fontSize: 8, padding: '2px 6px', borderRadius: 2, fontWeight: 700, letterSpacing: 1, color: col, border: `1px solid ${col}40`, background: col + '12' }}>
           {STATUS_LABEL[r.status]}
@@ -99,13 +100,13 @@ export function RobotDetail({ robot: r, onClose, onAction }: Props) {
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, padding: '8px 12px', borderTop: '1px solid var(--border)' }}>
         <ActionBtn icon={isPaused ? <PlayIcon /> : <PauseIcon />} label={isPaused ? 'Resume' : 'Pause'} color={isPaused ? '#16a34a' : '#f59e0b'}
           onClick={() => onAction(isPaused ? 'RESUME' : 'PAUSE')} />
-        <ActionBtn icon={<ParkIcon />}   label="Park"   color="#2563eb" onClick={() => onAction('PARK')} title="Send to its park dock" />
-        <ActionBtn icon={<BoltIcon />}   label="Charge" color="#ea7a00" onClick={() => onAction('CHARGE')} title="Send to the nearest charge dock" />
+        {!live && <ActionBtn icon={<ParkIcon />} label="Park" color="#2563eb" onClick={() => onAction('PARK')} title="Send to its park dock (simulation)" />}
+        <ActionBtn icon={<BoltIcon />}   label="Charge" color="#ea7a00" onClick={() => onAction('CHARGE')} title={live ? 'startCharging (VDA5050 instantAction)' : 'Send to the nearest charge dock'} />
         <ActionBtn icon={<TargetIcon />} label="View"   color="#0891b2" onClick={() => onAction('VIEW')} title="Center the map on this robot" />
-        {/* Leave: pull off the map to clear a real traffic deadlock; Return to bring it back */}
-        <ActionBtn icon={isAway ? <ReturnIcon /> : <ExitIcon />} label={isAway ? 'Return' : 'Leave'} color={isAway ? '#16a34a' : '#7c3aed'}
+        {/* Leave/Return are sim-only (no VDA5050 equivalent) — hidden when live */}
+        {!live && <ActionBtn icon={isAway ? <ReturnIcon /> : <ExitIcon />} label={isAway ? 'Return' : 'Leave'} color={isAway ? '#16a34a' : '#7c3aed'}
           onClick={() => onAction(isAway ? 'RETURN' : 'LEAVE')}
-          title={isAway ? 'Bring the robot back onto the map' : 'Temporarily remove from the map so another AGV can pass a deadlock'} />
+          title={isAway ? 'Bring the robot back onto the map' : 'Temporarily remove from the map so another AGV can pass a deadlock'} />}
         <ActionBtn icon={<CancelIcon />} label="Cancel" color="#dc2626" onClick={() => onAction('CANCEL')} title="cancelOrder — clear the robot's current task (VDA5050 instantAction)" />
         <ActionBtn icon={<ClearErrIcon />} label="Clear Err" color="#ea7a00" onClick={() => onAction('CLEAR_ERR')}
           title="Recover from a fault: sends cancelOrder to drop the failed task and clears this robot's alarms. A persistent hardware fault must be cleared at the robot HMI." />

@@ -40,7 +40,13 @@ const EMPTY_SET: Set<string> = new Set()
 // 10×/s. We ease the *displayed* pose toward the latest one over one tick so
 // motion reads smooth at 60 fps (entity interpolation, ~one tick of latency).
 const INTERP_MS = 100
-type Interp = { fx: number; fy: number; fth: number; tx: number; ty: number; tth: number; t0: number }
+// Ease each robot over the MEASURED gap between its state updates so motion is smooth
+// at any rate: a live robot reports ~1 Hz (RoboVDA state_report_frequency) — easing over
+// the real ~1000 ms gap avoids the "jump in 100 ms then freeze 900 ms" stutter; the sim
+// updates fast (small gap) and stays crisp. Clamp so bursts/long stalls stay sane.
+const INTERP_MIN = 80
+const INTERP_MAX = 1500
+type Interp = { fx: number; fy: number; fth: number; tx: number; ty: number; tth: number; t0: number; dur: number }
 // shortest-arc angle lerp in degrees
 function angLerp(from: number, to: number, a: number): number {
   const d = ((to - from + 540) % 360) - 180
@@ -160,17 +166,19 @@ export function MapCanvas({ map, robots, config, selectedRobotId, onRobotClick, 
         const p = r.pose
         let e = interp.get(r.id)
         if (!e) {                       // first sight: snap, no ease
-          e = { fx: p.x, fy: p.y, fth: p.theta, tx: p.x, ty: p.y, tth: p.theta, t0: now }
+          e = { fx: p.x, fy: p.y, fth: p.theta, tx: p.x, ty: p.y, tth: p.theta, t0: now, dur: INTERP_MS }
           interp.set(r.id, e)
         } else if (e.tx !== p.x || e.ty !== p.y || e.tth !== p.theta) {
-          // new target arrived → ease from the currently-displayed pose
-          const a = Math.min(1, (now - e.t0) / INTERP_MS)
+          // new target arrived → snapshot the currently-displayed pose, then ease toward
+          // the new target over the time that actually elapsed since the last update.
+          const a = Math.min(1, (now - e.t0) / e.dur)
           e.fx = e.fx + (e.tx - e.fx) * a
           e.fy = e.fy + (e.ty - e.fy) * a
           e.fth = angLerp(e.fth, e.tth, a)
+          e.dur = Math.max(INTERP_MIN, Math.min(INTERP_MAX, now - e.t0))
           e.tx = p.x; e.ty = p.y; e.tth = p.theta; e.t0 = now
         }
-        const a = Math.min(1, (now - e.t0) / INTERP_MS)
+        const a = Math.min(1, (now - e.t0) / e.dur)
         const pose = {
           ...p,
           x: e.fx + (e.tx - e.fx) * a,
@@ -1033,10 +1041,11 @@ function drawRobot(ctx: CanvasRenderingContext2D, r: Robot, t: Transform, cfg: M
   // Label (in the identity colour)
   const lblSz = Math.max(8, cfg.labelSize - 1)
   ctx.font = `bold ${lblSz}px Roboto Mono, "Noto Sans JP", monospace`; ctx.textAlign = 'center'
-  const lw = ctx.measureText(r.id).width; const lby = sy + half + lblSz + 4
+  const label = r.name || r.id
+  const lw = ctx.measureText(label).width; const lby = sy + half + lblSz + 4
   ctx.fillStyle = getCanvas().labelBg
   ctx.fillRect(sx - lw / 2 - 2, lby - lblSz, lw + 4, lblSz + 2)
-  ctx.fillStyle = idc; ctx.fillText(r.id, sx, lby)
+  ctx.fillStyle = idc; ctx.fillText(label, sx, lby)
   // Selection ring
   if (selId === r.id) {
     ctx.beginPath(); ctx.arc(sx, sy, half * 1.6, 0, Math.PI * 2)
