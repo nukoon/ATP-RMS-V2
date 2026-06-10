@@ -39,6 +39,9 @@ interface ConfigStore {
   maps: MapConfig[]
   activeMapId: string
   addMap:    (m: MapConfig) => void
+  // Replace an existing map's data IN PLACE (same id) so everything scoped to the
+  // mapId — storages, docks, traffic areas — survives a map re-upload.
+  updateMapData: (id: string, data: string, name?: string) => void
   removeMap: (id: string) => void
   setActiveMap: (id: string) => void
 
@@ -80,6 +83,10 @@ export const useConfigStore = create<ConfigStore>()(
       maps: [BUILTIN_MAP],
       activeMapId: BUILTIN_MAP.id,
       addMap: (m) => set(s => ({ maps: [...s.maps, m], activeMapId: m.id })),
+      updateMapData: (id, data, name) => set(s => ({
+        maps: s.maps.map(m => m.id === id ? { ...m, data, source: 'uploaded' as const, ...(name ? { name } : null) } : m),
+        activeMapId: id,   // switch to it so the canvas reloads the new version
+      })),
       removeMap: (id) => set(s => {
         if (id === BUILTIN_MAP.id) return s
         const maps = s.maps.filter(m => m.id !== id)

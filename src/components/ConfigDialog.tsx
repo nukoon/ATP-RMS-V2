@@ -253,21 +253,48 @@ function AmrRow({ a, updateAmr, removeAmr, onErr }: {
 
 // ── Maps tab ───────────────────────────────────────────────
 function MapTab() {
-  const { maps, activeMapId, addMap, removeMap, setActiveMap } = useConfigStore()
+  const { maps, activeMapId, addMap, updateMapData, removeMap, setActiveMap } = useConfigStore()
   const [name, setName] = useState('')
   const [err, setErr]   = useState('')
+  const [note, setNote] = useState('')
 
-  const onFile = async (file: File) => {
-    setErr('')
+  // validate an uploaded ATP/SEER map file, return its text or null (sets err)
+  const readMap = async (file: File): Promise<string | null> => {
+    setErr(''); setNote('')
     try {
       const text = await file.text()
       const obj = JSON.parse(text)
-      if (!Array.isArray(obj.advancedPointList)) { setErr('Not an ATP/SEER map (missing advancedPointList)'); return }
-      addMap({ id: `map-${Date.now()}`, name: name.trim() || file.name.replace(/\.(json|smap)$/i, ''), source: 'uploaded', data: text })
-      setName('')
+      if (!Array.isArray(obj.advancedPointList)) { setErr('Not an ATP/SEER map (missing advancedPointList)'); return null }
+      return text
     } catch {
       setErr('Invalid map file (not valid JSON)')
+      return null
     }
+  }
+
+  // Add = upsert-by-name: re-uploading a map with the SAME name replaces its data in
+  // place (same mapId), so storages/docks/traffic bound to that map survive the update.
+  const onFile = async (file: File) => {
+    const text = await readMap(file)
+    if (text === null) return
+    const finalName = name.trim() || file.name.replace(/\.(json|smap)$/i, '')
+    const existing = maps.find(m => m.source !== 'builtin' && m.name.toLowerCase() === finalName.toLowerCase())
+    if (existing) {
+      updateMapData(existing.id, text)
+      setNote(`Updated "${existing.name}" — facility data (storages/docks/zones) kept`)
+    } else {
+      addMap({ id: `map-${Date.now()}`, name: finalName, source: 'uploaded', data: text })
+    }
+    setName('')
+  }
+
+  // per-row ⟳: replace this map's data explicitly, whatever the file is called
+  const onReplace = async (id: string, file: File) => {
+    const text = await readMap(file)
+    if (text === null) return
+    updateMapData(id, text)
+    const m = maps.find(x => x.id === id)
+    setNote(`Updated "${m?.name ?? id}" — facility data (storages/docks/zones) kept`)
   }
 
   return (
@@ -281,6 +308,10 @@ function MapTab() {
             onChange={e => { const f = e.target.files?.[0]; if (f) onFile(f) }} />
         </label>
         {err && <span style={{ marginLeft: 10, fontSize: 10, color: '#dc2626' }}>{err}</span>}
+        {note && <span style={{ marginLeft: 10, fontSize: 10, color: '#16a34a' }}>✓ {note}</span>}
+        <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 5 }}>
+          อัปโหลดชื่อเดิมซ้ำ = อัปเดตแมพเดิม (ข้อมูล storage/dock/zone ไม่หาย) · ตั้งชื่อใหม่ = เพิ่มแมพใหม่
+        </div>
       </div>
       <div style={{ borderTop: '1px solid var(--border)', paddingTop: 8 }}>
         <Label>Maps ({maps.length})</Label>
@@ -289,6 +320,14 @@ function MapTab() {
             <input type="radio" checked={activeMapId === m.id} onChange={() => setActiveMap(m.id)} style={{ accentColor: 'var(--accent)' }} />
             <span style={{ flex: 1, color: activeMapId === m.id ? 'var(--accent)' : 'var(--text)' }}>{m.name}</span>
             <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>{m.source}</span>
+            {m.source !== 'builtin' && (
+              <label title="Replace this map's data with a new file (keeps storages/docks/zones)"
+                style={{ color: 'var(--accent)', cursor: 'pointer', fontSize: 12, lineHeight: 1 }}>
+                ⟳
+                <input type="file" accept=".json,.smap,application/json" style={{ display: 'none' }}
+                  onChange={e => { const f = e.target.files?.[0]; if (f) onReplace(m.id, f); e.target.value = '' }} />
+              </label>
+            )}
             {m.source !== 'builtin' && <button onClick={() => removeMap(m.id)} style={{ background: 'transparent', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: 14 }}>×</button>}
           </div>
         ))}
