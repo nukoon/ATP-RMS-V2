@@ -30,7 +30,7 @@ import { useThemeStore } from '@/store/theme.store'
 import { StatusBar }    from '@/components/StatusBar'
 import { useMapTransform } from '@/hooks/useMapTransform'
 import { VDA_BRANDS } from '@/constants/vda-brands'
-import { buildInstantActions } from '@/services/order.service'
+import { buildInstantActions, buildNavOrder } from '@/services/order.service'
 import type { VDA5050State } from '@/types'
 import type { AlarmLevel } from '@/types/fleet'
 
@@ -64,6 +64,68 @@ function syncLiveAlarms(
   for (const a of store.alarms) {
     if (a.agvId === agvId && a.status === 'ACTIVE' && !codes.has(a.code)) store.resolveAlarm(a.id)
   }
+}
+
+// Live mission lifecycle from the robot's VDA5050 `actionStates` (the LIVE counterpart
+// of what the simulator does at pick/drop): pick FINISHED → robot carries the load and
+// the pickup storage empties; drop FINISHED → the load is released, the dropoff fills,
+// and the mission finishes. Tracked per orderId so each flip fires exactly once.
+const livePickDone = new Set<string>()
+const liveDropDone = new Set<string>()
+function syncLiveMission(
+  store: ReturnType<typeof useFleetStore.getState>,
+  agvId: string,
+  st: VDA5050State,
+) {
+  const acts = (st as { actionStates?: { actionType?: string; actionStatus?: string }[] }).actionStates
+  if (!acts) return
+  const pickDone = acts.some(a => a.actionType === 'pick' && a.actionStatus === 'FINISHED')
+  const dropDone = acts.some(a => a.actionType === 'drop' && a.actionStatus === 'FINISHED')
+  store.setRobotCarrying(agvId, pickDone && !dropDone)   // box on the forks between pick & drop
+  const orderId = (st as { orderId?: string }).orderId
+  if (!orderId) return
+  const m = store.missions.find(x => x.missionNo === orderId)
+  if (pickDone && !livePickDone.has(orderId)) {
+    livePickDone.add(orderId)
+    cancelAutoPark(agvId)   // a new job started — don't auto-park
+    if (m?.pickupStorageId) useStorageStore.getState().setState(m.pickupStorageId, 'EMPTY').catch(() => {})
+    if (m) store.updateMission(m.id, { status: 'EXECUTING', progress: 50 })
+  }
+  if (dropDone && !liveDropDone.has(orderId)) {
+    liveDropDone.add(orderId)
+    if (m?.dropoffStorageId) useStorageStore.getState().setState(m.dropoffStorageId, 'FULL').catch(() => {})
+    if (m) store.updateMission(m.id, { status: 'FINISHED', progress: 100 })
+    scheduleAutoPark(agvId)   // job done → after a grace period, return to park if no new work
+  }
+}
+
+// ── Auto-park ────────────────────────────────────────────────────────────────
+// After a live robot finishes a job, wait a grace period; if no new work turns up
+// it drives itself back to its park node. `sendParkOrder` is also the manual "Park"
+// button's action. Routing respects one-way lanes via buildNavOrder→routeEdges.
+const AUTO_PARK_DELAY = 5000
+const parkTimers = new Map<string, ReturnType<typeof setTimeout>>()
+const cancelAutoPark = (agvId: string) => { const t = parkTimers.get(agvId); if (t) { clearTimeout(t); parkTimers.delete(agvId) } }
+function sendParkOrder(agvId: string) {
+  const fs = useFleetStore.getState()
+  const robot = fs.robots.get(agvId)
+  const amr = useConfigStore.getState().amrs.find(a => a.serial === agvId)
+  const from = robot?.currentNodeId, park = amr?.parkNode
+  if (!fs.map || !from || !park || from === park) return
+  const mfr = (VDA_BRANDS[amr?.brand ?? 'aiten'] ?? VDA_BRANDS.aiten).manufacturer
+  const order = buildNavOrder(agvId, mfr, fs.map, from, park)
+  if (order) mqttService.sendOrder(agvId, order)
+}
+function scheduleAutoPark(agvId: string) {
+  cancelAutoPark(agvId)
+  parkTimers.set(agvId, setTimeout(() => {
+    parkTimers.delete(agvId)
+    const fs = useFleetStore.getState()
+    // a pending/active mission means new work is coming — stay put
+    const busy = fs.missions.some(m => m.status === 'PENDING' || m.status === 'ASSIGNED' || m.status === 'EXECUTING')
+    if (busy || fs.robots.get(agvId)?.status === 'EXECUTING') return
+    sendParkOrder(agvId)
+  }, AUTO_PARK_DELAY))
 }
 
 export default function App() {
@@ -135,6 +197,7 @@ export default function App() {
   // live robot (manufacturer comes from the AMR's brand preset). Actions with no
   // VDA5050 equivalent (PARK/LEAVE/RETURN) are ignored in live mode.
   const sendLiveAction = (robotId: string, a: RobotAction) => {
+    if (a === 'PARK') { cancelAutoPark(robotId); sendParkOrder(robotId); return }  // drive to the park node
     const map: Partial<Record<RobotAction, string>> = {
       PAUSE: 'startPause', RESUME: 'stopPause', CANCEL: 'cancelOrder',
       CHARGE: 'startCharging', CLEAR_ERR: 'cancelOrder',
@@ -173,6 +236,7 @@ export default function App() {
       const fs = useFleetStore.getState()
       fs.updateFromVDA5050(id, st)
       syncLiveAlarms(fs, id, st.errors)        // live errors → ALARMS panel
+      syncLiveMission(fs, id, st)              // live pick/drop → carrying + stock + mission
     })
     mqttService.onPathUpdate((id, path) => useFleetStore.getState().setRobotPath(id, path))   // live route → map
     mqttService.onConnectionChange((c) => useFleetStore.getState().setMqttConnected(c))

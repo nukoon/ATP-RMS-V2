@@ -100,7 +100,7 @@ export function RobotDetail({ robot: r, onClose, onAction, live }: Props) {
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, padding: '8px 12px', borderTop: '1px solid var(--border)' }}>
         <ActionBtn icon={isPaused ? <PlayIcon /> : <PauseIcon />} label={isPaused ? 'Resume' : 'Pause'} color={isPaused ? '#16a34a' : '#f59e0b'}
           onClick={() => onAction(isPaused ? 'RESUME' : 'PAUSE')} />
-        {!live && <ActionBtn icon={<ParkIcon />} label="Park" color="#2563eb" onClick={() => onAction('PARK')} title="Send to its park dock (simulation)" />}
+        <ActionBtn icon={<ParkIcon />} label="Park" color="#2563eb" onClick={() => onAction('PARK')} title={live ? 'Drive to the park node' : 'Send to its park dock (simulation)'} />
         <ActionBtn icon={<BoltIcon />}   label="Charge" color="#ea7a00" onClick={() => onAction('CHARGE')} title={live ? 'startCharging (VDA5050 instantAction)' : 'Send to the nearest charge dock'} />
         <ActionBtn icon={<TargetIcon />} label="View"   color="#0891b2" onClick={() => onAction('VIEW')} title="Center the map on this robot" />
         {/* Leave/Return are sim-only (no VDA5050 equivalent) — hidden when live */}

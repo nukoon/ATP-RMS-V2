@@ -40,13 +40,15 @@ const EMPTY_SET: Set<string> = new Set()
 // 10×/s. We ease the *displayed* pose toward the latest one over one tick so
 // motion reads smooth at 60 fps (entity interpolation, ~one tick of latency).
 const INTERP_MS = 100
-// Ease each robot over the MEASURED gap between its state updates so motion is smooth
-// at any rate: a live robot reports ~1 Hz (RoboVDA state_report_frequency) — easing over
-// the real ~1000 ms gap avoids the "jump in 100 ms then freeze 900 ms" stutter; the sim
-// updates fast (small gap) and stays crisp. Clamp so bursts/long stalls stay sane.
+// Ease each robot over the (smoothed) gap between its state updates so motion is smooth
+// at any rate: a live robot reports ~1 Hz (RoboVDA state_report_frequency). We track an
+// EMA of the interval and ease over LEAD× that, so the robot is still gliding when the
+// next update lands (re-targeting from the live pose) instead of reaching the old target
+// early and freezing. Clamp so bursts/long stalls stay sane.
 const INTERP_MIN = 80
-const INTERP_MAX = 1500
-type Interp = { fx: number; fy: number; fth: number; tx: number; ty: number; tth: number; t0: number; dur: number }
+const INTERP_MAX = 1800
+const INTERP_LEAD = 1.4
+type Interp = { fx: number; fy: number; fth: number; tx: number; ty: number; tth: number; t0: number; dur: number; gap: number }
 // shortest-arc angle lerp in degrees
 function angLerp(from: number, to: number, a: number): number {
   const d = ((to - from + 540) % 360) - 180
@@ -112,6 +114,10 @@ export function MapCanvas({ map, robots, config, selectedRobotId, onRobotClick, 
   selectedNodeRef.current = selectedNode
   // per-robot interpolation state (persists across re-renders / rAF restarts)
   const interpRef = useRef<Map<string, Interp>>(new Map())
+  // read robots through a ref so the draw loop stays stable (doesn't restart every
+  // ~1 Hz state update) — that restart is itself a source of motion hitching.
+  const robotsRef = useRef<Robot[]>(robots)
+  robotsRef.current = robots
 
   // Keep canvas pixel size in sync with its CSS box; fit map on first size
   useEffect(() => {
@@ -146,7 +152,7 @@ export function MapCanvas({ map, robots, config, selectedRobotId, onRobotClick, 
     drawAxes(ctx, tt)
     drawEdges(ctx, map, tt, config)
     if (config.showHeatmap) drawEdgeHeat(ctx, map, edgeHeatRef.current, tt)
-    robots.forEach(r => drawRobotPath(ctx, map, r, tt, config))
+    robotsRef.current.forEach(r => drawRobotPath(ctx, map, r, tt, config))
     // when storage is shown, its icon stands in for the bound node (hide that node)
     const storageNodes = config.showStorage
       ? new Set(storagesRef.current.filter(s => s.enabled).map(s => s.nodeId))
@@ -161,21 +167,23 @@ export function MapCanvas({ map, robots, config, selectedRobotId, onRobotClick, 
       const interp = interpRef.current
       const now = performance.now()
       const live = new Set<string>()
-      for (const r of robots) {
+      for (const r of robotsRef.current) {
         live.add(r.id)
         const p = r.pose
         let e = interp.get(r.id)
         if (!e) {                       // first sight: snap, no ease
-          e = { fx: p.x, fy: p.y, fth: p.theta, tx: p.x, ty: p.y, tth: p.theta, t0: now, dur: INTERP_MS }
+          e = { fx: p.x, fy: p.y, fth: p.theta, tx: p.x, ty: p.y, tth: p.theta, t0: now, dur: INTERP_MS, gap: 0 }
           interp.set(r.id, e)
         } else if (e.tx !== p.x || e.ty !== p.y || e.tth !== p.theta) {
           // new target arrived → snapshot the currently-displayed pose, then ease toward
-          // the new target over the time that actually elapsed since the last update.
+          // the new target over LEAD× the smoothed update interval (so it keeps gliding).
           const a = Math.min(1, (now - e.t0) / e.dur)
           e.fx = e.fx + (e.tx - e.fx) * a
           e.fy = e.fy + (e.ty - e.fy) * a
           e.fth = angLerp(e.fth, e.tth, a)
-          e.dur = Math.max(INTERP_MIN, Math.min(INTERP_MAX, now - e.t0))
+          const interval = now - e.t0
+          e.gap = e.gap ? e.gap * 0.6 + interval * 0.4 : interval
+          e.dur = Math.max(INTERP_MIN, Math.min(INTERP_MAX, e.gap * INTERP_LEAD))
           e.tx = p.x; e.ty = p.y; e.tth = p.theta; e.t0 = now
         }
         const a = Math.min(1, (now - e.t0) / e.dur)
@@ -208,7 +216,7 @@ export function MapCanvas({ map, robots, config, selectedRobotId, onRobotClick, 
     }
 
     animRef.current = requestAnimationFrame(draw)
-  }, [map, robots, config, selectedRobotId])
+  }, [map, config, selectedRobotId])   // robots read via robotsRef → loop doesn't restart on state ticks
 
   useEffect(() => {
     animRef.current = requestAnimationFrame(draw)

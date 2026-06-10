@@ -57,6 +57,12 @@ const STATUS_BG = 'rgba(15,23,34,0.92)'    // dark tooltip box, reads on both th
 // world (metres) → scene vector on the ground plane
 const vec = (x: number, y: number, h = 0) => new THREE.Vector3(x, h, -y)
 
+// shortest-arc angle interpolation (degrees) — eases heading without spinning the long way
+const angLerp3 = (a: number, b: number, t: number) => a + (((b - a) % 360 + 540) % 360 - 180) * t
+// per-robot smoothing state stored on the mesh's userData (see syncRobots)
+type Ip3 = { fx: number; fy: number; fth: number; tx: number; ty: number; tth: number; t0: number; dur: number; gap: number }
+const IP3_MIN = 80, IP3_MAX = 1800, IP3_LEAD = 1.4   // ease over LEAD× the smoothed update gap
+
 // sample a curve into world points (line = 2, bezier = N) for the lane mesh
 function sampleCurve(c: MapCurve, n = 18): { x: number; y: number }[] {
   if (c.type === 'bezier' && c.cp.length >= 2) {
@@ -439,8 +445,26 @@ export function Map3DCanvas({ map, robots, config, selectedRobotId, onRobotClick
         }
         if (cargo) { cargo.visible = !!r.carrying || DEBUG_CARGO; cargo.scale.setScalar(CARGO_SIZE); cargo.position.y = CARGO_Y }
 
-        g.position.set(r.pose.x, 0, -r.pose.y)
-        g.rotation.y = THREE.MathUtils.degToRad(r.pose.theta)
+        // smooth motion: ease over the MEASURED state-update gap (live ~1 Hz) instead of
+        // snapping each frame, so the robot glides instead of stuttering (mirrors the 2D canvas).
+        const now = performance.now()
+        const tx = r.pose.x, ty = r.pose.y, tth = r.pose.theta
+        let ip = g.userData.ip as Ip3 | undefined
+        if (!ip) {
+          ip = { fx: tx, fy: ty, fth: tth, tx, ty, tth, t0: now, dur: 100, gap: 0 }; g.userData.ip = ip
+        } else if (ip.tx !== tx || ip.ty !== ty || ip.tth !== tth) {
+          const a = Math.min(1, (now - ip.t0) / ip.dur)
+          ip.fx += (ip.tx - ip.fx) * a
+          ip.fy += (ip.ty - ip.fy) * a
+          ip.fth = angLerp3(ip.fth, ip.tth, a)
+          const interval = now - ip.t0
+          ip.gap = ip.gap ? ip.gap * 0.6 + interval * 0.4 : interval
+          ip.dur = Math.max(IP3_MIN, Math.min(IP3_MAX, ip.gap * IP3_LEAD))
+          ip.tx = tx; ip.ty = ty; ip.tth = tth; ip.t0 = now
+        }
+        const a = Math.min(1, (now - ip.t0) / ip.dur)
+        g.position.set(ip.fx + (ip.tx - ip.fx) * a, 0, -(ip.fy + (ip.ty - ip.fy) * a))
+        g.rotation.y = THREE.MathUtils.degToRad(angLerp3(ip.fth, ip.tth, a))
 
         // running path: a coloured tube along the remaining route, rebuilt only
         // when the node sequence changes (the robot just slides along it)

@@ -98,19 +98,27 @@ export function buildVda5050Order(
     const all = [...leg1, ...leg2]
     const pickIdx = leg1.length        // node index of the pickup (startNode)
     const dropIdx = all.length         // node index of the dropoff (last node)
-    const firstNode = all.length ? all[0].sNode : start
-    // VDA5050 sequencing: nodes get even ids (0,2,4…), edges the odd id between them.
-    nodes = [{ nodeId: firstNode, sequenceId: 0, released: true, nodePosition: pos(firstNode),
-      actions: pickIdx === 0 ? pickActions : [] }]
-    edges = []
+    // node-id sequence with PICK on the pickup node, DROP on the dropoff node
+    const seq = [{ id: all.length ? all[0].sNode : start, acts: pickIdx === 0 ? pickActions : [] as VDA5050Action[] }]
     all.forEach((c, i) => {
-      const nodeSeq = (i + 1) * 2
-      const nodeIdx = i + 1
-      edges.push({ edgeId: c.id || `${c.sNode}-${c.eNode}`, sequenceId: nodeSeq - 1, released: true,
-        startNodeId: c.sNode, endNodeId: c.eNode, actions: [] })
-      nodes.push({ nodeId: c.eNode, sequenceId: nodeSeq, released: true, nodePosition: pos(c.eNode),
-        actions: nodeIdx === pickIdx ? pickActions : nodeIdx === dropIdx ? dropActions : [] })
+      const idx = i + 1
+      seq.push({ id: c.eNode, acts: idx === pickIdx ? pickActions : idx === dropIdx ? dropActions : [] })
     })
+    // Collapse pure corridor loops: if a nodeId repeats and the detour between has NO
+    // actions, drop it. The repeated node has the SAME outgoing edge so the shortened
+    // route stays map-valid; action-bearing detours (e.g. a branch pickup) are kept.
+    // This prevents revisited nodes that wedge RoboVDA's order-queue consumer.
+    for (let i = 0; i < seq.length; i++) {
+      let j = seq.length - 1
+      while (j > i && seq[j].id !== seq[i].id) j--
+      if (j > i && !seq.slice(i + 1, j + 1).some(n => n.acts.length)) seq.splice(i + 1, j - i)
+    }
+    // VDA5050 sequencing: nodes get even ids (0,2,4…), edges the odd id between them.
+    nodes = seq.map((n, i) => ({ nodeId: n.id, sequenceId: i * 2, released: true, nodePosition: pos(n.id), actions: n.acts }))
+    edges = []
+    for (let i = 1; i < seq.length; i++)
+      edges.push({ edgeId: `${seq[i - 1].id}-${seq[i].id}`, sequenceId: i * 2 - 1, released: true,
+        startNodeId: seq[i - 1].id, endNodeId: seq[i].id, actions: [] })
   } else {
     // no map / unreachable → direct 2-node order; the robot self-plans pickup→dropoff
     nodes = [
@@ -133,6 +141,37 @@ export function buildVda5050Order(
     orderUpdateId: 0,
     nodes,
     edges,
+  }
+}
+
+/**
+ * Build a plain navigation Order from the robot's current node to a target node
+ * (no pick/drop actions) — used for "go to Park" and auto-park. Returns null when
+ * there's no map or no routable path (so the caller can skip sending).
+ */
+export function buildNavOrder(
+  robotId: string,
+  manufacturer: string,
+  map: FleetMap | null,
+  fromNode: string,
+  toNode: string,
+): VDA5050Order | null {
+  if (!map || !fromNode || !toNode || fromNode === toNode) return null
+  const route = routeEdges(map, fromNode, toNode)
+  if (!route || !route.length) return null
+  const pos = (id: string) => {
+    const p = map.points.find(pt => pt.id === id)
+    return p ? { x: p.x, y: p.y, theta: p.theta, mapId: 'map' } : undefined
+  }
+  const nodes: VDA5050Node[] = [{ nodeId: fromNode, sequenceId: 0, released: true, nodePosition: pos(fromNode), actions: [] }]
+  const edges: VDA5050Edge[] = []
+  route.forEach((c, i) => {
+    edges.push({ edgeId: `${c.sNode}-${c.eNode}`, sequenceId: (i + 1) * 2 - 1, released: true, startNodeId: c.sNode, endNodeId: c.eNode, actions: [] })
+    nodes.push({ nodeId: c.eNode, sequenceId: (i + 1) * 2, released: true, nodePosition: pos(c.eNode), actions: [] })
+  })
+  return {
+    headerId: headerCounter++, timestamp: new Date().toISOString(), version: VDA5050_VERSION,
+    manufacturer, serialNumber: robotId, orderId: `PARK-${uid()}`, orderUpdateId: 0, nodes, edges,
   }
 }
 
