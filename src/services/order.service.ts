@@ -64,6 +64,18 @@ function routeEdges(map: FleetMap, start: string, goal: string): MapCurve[] | nu
 }
 
 /**
+ * Routed travel cost (metres) from one node to another, or null when unreachable.
+ * Used by the live dispatcher to pick the nearest free robot — the same metric the
+ * simulator's Dijkstra dispatch uses.
+ */
+export function routeCost(map: FleetMap, from: string, to: string): number | null {
+  if (from === to) return 0
+  const route = routeEdges(map, from, to)
+  if (!route) return null
+  return route.reduce((s, c) => s + (Math.hypot(c.ex - c.sx, c.ey - c.sy) || 0.5), 0)
+}
+
+/**
  * Build a VDA5050 Order from pickup → dropoff. When the map graph connects them,
  * the order carries the FULL routed node/edge sequence (PICK actions on the first
  * node, DROP on the last) so RoboVDA/SEER follows real, individually-routable hops.
@@ -98,20 +110,23 @@ export function buildVda5050Order(
     const all = [...leg1, ...leg2]
     const pickIdx = leg1.length        // node index of the pickup (startNode)
     const dropIdx = all.length         // node index of the dropoff (last node)
-    // node-id sequence with PICK on the pickup node, DROP on the dropoff node
-    const seq = [{ id: all.length ? all[0].sNode : start, acts: pickIdx === 0 ? pickActions : [] as VDA5050Action[] }]
+    // node-id sequence with PICK on the pickup node, DROP on the dropoff node.
+    // `keep` pins the pickup/dropoff stops: a storage with no bound actions still
+    // MUST be visited (the collapse below would otherwise optimize the detour away —
+    // seen live: an actionless pickup node vanished from the routed order).
+    const seq = [{ id: all.length ? all[0].sNode : start, acts: pickIdx === 0 ? pickActions : [] as VDA5050Action[], keep: pickIdx === 0 }]
     all.forEach((c, i) => {
       const idx = i + 1
-      seq.push({ id: c.eNode, acts: idx === pickIdx ? pickActions : idx === dropIdx ? dropActions : [] })
+      seq.push({ id: c.eNode, acts: idx === pickIdx ? pickActions : idx === dropIdx ? dropActions : [], keep: idx === pickIdx || idx === dropIdx })
     })
     // Collapse pure corridor loops: if a nodeId repeats and the detour between has NO
-    // actions, drop it. The repeated node has the SAME outgoing edge so the shortened
-    // route stays map-valid; action-bearing detours (e.g. a branch pickup) are kept.
-    // This prevents revisited nodes that wedge RoboVDA's order-queue consumer.
+    // actions and no pinned stop, drop it. The repeated node has the SAME outgoing edge
+    // so the shortened route stays map-valid; action-bearing detours (e.g. a branch
+    // pickup) are kept. This prevents revisited nodes that wedge RoboVDA's order queue.
     for (let i = 0; i < seq.length; i++) {
       let j = seq.length - 1
       while (j > i && seq[j].id !== seq[i].id) j--
-      if (j > i && !seq.slice(i + 1, j + 1).some(n => n.acts.length)) seq.splice(i + 1, j - i)
+      if (j > i && !seq.slice(i + 1, j + 1).some(n => n.acts.length || n.keep)) seq.splice(i + 1, j - i)
     }
     // VDA5050 sequencing: nodes get even ids (0,2,4…), edges the odd id between them.
     nodes = seq.map((n, i) => ({ nodeId: n.id, sequenceId: i * 2, released: true, nodePosition: pos(n.id), actions: n.acts }))

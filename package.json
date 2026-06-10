@@ -11,7 +11,8 @@
     "type-check": "tsc --noEmit",
     "server": "node server/index.js",
     "seer-bridge": "node server/seer-bridge.js --relay",
-    "seer-bridge:poll": "node server/seer-bridge.js --poll"
+    "seer-bridge:poll": "node server/seer-bridge.js --poll",
+    "fake-robot": "node server/fake-robot.js"
   },
   "dependencies": {
     "aedes": "^1.0.2",

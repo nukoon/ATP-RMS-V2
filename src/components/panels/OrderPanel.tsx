@@ -5,18 +5,12 @@
  * VDA5050 action plan on the backend. On completion the storages flip state.
  */
 import { useState } from 'react'
-import type { Mission, Storage, StorageArea, AmrConfig } from '@/types/fleet'
+import type { Mission, Storage, StorageArea } from '@/types/fleet'
 import { useFleetStore } from '@/store/fleet.store'
 import { useStorageStore } from '@/store/storage.store'
-import { useConfigStore } from '@/store/config.store'
 import { useAuthStore } from '@/store/auth.store'
 import { api, ApiError } from '@/services/api'
-import { mqttService } from '@/services/mqtt.service'
-import { buildVda5050Order } from '@/services/order.service'
-import { VDA_BRANDS } from '@/constants/vda-brands'
-
-// the VDA5050 manufacturer segment for a robot comes from its brand preset
-const mfrOf = (a: AmrConfig) => (VDA_BRANDS[a.brand] ?? VDA_BRANDS.aiten).manufacturer
+import { liveDispatcher } from '@/services/dispatch.service'
 
 const STATUS_COLOR: Record<Mission['status'], string> = {
   PENDING:   'var(--text-muted)',
@@ -41,11 +35,7 @@ export function OrderPanel({ onManageStorage, sel, setSel, pickMode, onRequestPi
   const addMission  = useFleetStore(s => s.addMission)
   const cancelMission = useFleetStore(s => s.cancelMission)
   const updateMission = useFleetStore(s => s.updateMission)
-  const map         = useFleetStore(s => s.map)
-  const robots      = useFleetStore(s => s.robots)
-  const mqttConnected = useFleetStore(s => s.mqttConnected)
   const storages    = useStorageStore(s => s.storages)
-  const amrs        = useConfigStore(s => s.amrs)
 
   const areas       = useStorageStore(s => s.areas)
 
@@ -97,24 +87,16 @@ export function OrderPanel({ onManageStorage, sel, setSel, pickMode, onRequestPi
     try {
       if (mode === 'batch') {
         const created = await api.createBatchMissions({ pickupAreaId: pAreaId, dropoffAreaId: dAreaId, priority })
-        for (const m of created) {
-          addMission(m)
-          if (mqttConnected) {
-            const target = amrs.find(a => a.enabled)
-            if (target) mqttService.sendOrder(target.serial, buildVda5050Order(target.serial, mfrOf(target), m, map, robots.get(target.serial)?.currentNodeId))
-          }
-        }
+        for (const m of created) addMission(m)
         setSel(s => ({ ...s, pickArea: undefined, dropArea: undefined })); onRequestPick(null)
       } else {
         const m = await api.createMission({ pickupStorageId: pickId, dropoffStorageId: dropId, priority })
         addMission(m)
-        // LIVE: publish a VDA5050 Order (with the resolved PICK/DROP actions) to a real robot
-        if (mqttConnected) {
-          const target = amrs.find(a => a.enabled)
-          if (target) mqttService.sendOrder(target.serial, buildVda5050Order(target.serial, mfrOf(target), m, map, robots.get(target.serial)?.currentNodeId))
-        }
         setSel(s => ({ ...s, pickup: undefined, dropoff: undefined })); onRequestPick(null)
       }
+      // LIVE: the dispatcher assigns PENDING missions to free robots (one order per
+      // robot, queueing the rest) instead of firing every order at the first AMR.
+      liveDispatcher.kick()
     } catch (e) {
       setErr(e instanceof ApiError ? e.message : 'failed to create mission')
     } finally {
@@ -205,7 +187,7 @@ export function OrderPanel({ onManageStorage, sel, setSel, pickMode, onRequestPi
                 </span>
                 {/* urgent: jump this PENDING mission to the front of the dispatch queue */}
                 {m.status === 'PENDING' && m.priority > 1 && (
-                  <button onClick={() => updateMission(m.id, { priority: 1 })} title="Mark urgent (priority 1)"
+                  <button onClick={() => { updateMission(m.id, { priority: 1 }); liveDispatcher.kick() }} title="Mark urgent (priority 1)"
                     style={{ fontSize: 9, lineHeight: 1, padding: '1px 4px', borderRadius: 2, cursor: 'pointer', color: '#dc2626',
                       border: '1px solid rgba(220,38,38,0.35)', background: 'rgba(220,38,38,0.06)' }}>⚡</button>
                 )}
@@ -235,7 +217,7 @@ export function OrderPanel({ onManageStorage, sel, setSel, pickMode, onRequestPi
                   <div style={{ height: '100%', width: '100%', background: '#16a34a', transform: `scaleX(${m.progress / 100})`, transformOrigin: 'left', transition: 'transform 0.4s' }} />
                 </div>
                 <span style={{ fontFamily: 'Roboto Mono', fontSize: 9, color: 'var(--text-muted)' }}>{m.progress}%</span>
-                <button onClick={() => cancelMission(m.id)} title="Cancel"
+                <button onClick={() => { liveDispatcher.cancel(m); cancelMission(m.id) }} title="Cancel"
                   style={{ background: 'transparent', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: 12, lineHeight: 1, padding: 0 }}>×</button>
               </div>
             )}

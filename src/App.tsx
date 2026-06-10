@@ -31,6 +31,7 @@ import { StatusBar }    from '@/components/StatusBar'
 import { useMapTransform } from '@/hooks/useMapTransform'
 import { VDA_BRANDS } from '@/constants/vda-brands'
 import { buildInstantActions, buildNavOrder } from '@/services/order.service'
+import { liveDispatcher } from '@/services/dispatch.service'
 import type { VDA5050State } from '@/types'
 import type { AlarmLevel } from '@/types/fleet'
 
@@ -94,7 +95,11 @@ function syncLiveMission(
   if (dropDone && !liveDropDone.has(orderId)) {
     liveDropDone.add(orderId)
     if (m?.dropoffStorageId) useStorageStore.getState().setState(m.dropoffStorageId, 'FULL').catch(() => {})
-    if (m) store.updateMission(m.id, { status: 'FINISHED', progress: 100 })
+    if (m) {
+      store.updateMission(m.id, { status: 'FINISHED', progress: 100, finishedAt: new Date().toISOString() })
+      store.recordOrderCompleted()   // live deliveries count in throughput/KPIs too
+    }
+    liveDispatcher.kick()     // queued work first — only park if the queue is empty
     scheduleAutoPark(agvId)   // job done → after a grace period, return to park if no new work
   }
 }
@@ -217,7 +222,7 @@ export default function App() {
 
   // Connect to a real broker and stream the enabled AMRs
   const toggleLive = () => {
-    if (live) { mqttService.disconnect(); useFleetStore.getState().setMqttConnected(false); setLive(false); return }
+    if (live) { liveDispatcher.stop(); mqttService.disconnect(); useFleetStore.getState().setMqttConnected(false); setLive(false); return }
     const enabled = amrs.filter(a => a.enabled)
     if (!enabled.length) { setShowConfig(true); return }
     // seed robots so VDA5050 state updates have something to update
@@ -247,10 +252,11 @@ export default function App() {
       return { serial: a.serial, manufacturer: b.manufacturer, baseTopic: b.baseTopic }
     })
     mqttService.connect({ brokerUrl: broker.wsUrl, username: broker.username, password: broker.password }, mqttRobots)
+    liveDispatcher.start()   // queue PENDING missions → free live robots while connected
     setLive(true)
   }
 
-  useEffect(() => () => { simulationService.stop(); mqttService.disconnect() }, [])
+  useEffect(() => () => { simulationService.stop(); liveDispatcher.stop(); mqttService.disconnect() }, [])
 
   // Esc cancels an in-progress job pick-on-map
   useEffect(() => {
@@ -351,7 +357,7 @@ export default function App() {
               ⚇ USERS
             </button>
           )}
-          <button onClick={() => { if (live) mqttService.disconnect(); simulationService.stop(); clearAuth() }}
+          <button onClick={() => { if (live) { liveDispatcher.stop(); mqttService.disconnect() } simulationService.stop(); clearAuth() }}
             title="Sign out"
             style={{ fontFamily: 'Roboto Mono', fontSize: 9, cursor: 'pointer', color: '#dc2626',
               border: '1px solid rgba(220,38,38,0.35)', background: 'transparent', padding: '2px 7px', borderRadius: 2 }}>
