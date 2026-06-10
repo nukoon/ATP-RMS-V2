@@ -203,9 +203,28 @@ export default function App() {
   // VDA5050 equivalent (PARK/LEAVE/RETURN) are ignored in live mode.
   const sendLiveAction = (robotId: string, a: RobotAction) => {
     if (a === 'PARK') { cancelAutoPark(robotId); sendParkOrder(robotId); return }  // drive to the park node
+    // CHARGE: drive to the AMR's charge node first — a SEER charge point docks and
+    // starts charging on arrival. Already there (or no route)? then just switch the
+    // charger on via the startCharging instantAction (RoboVDA → SetDO).
+    if (a === 'CHARGE') {
+      cancelAutoPark(robotId)
+      const fs = useFleetStore.getState()
+      const robot = fs.robots.get(robotId)
+      const amr = amrs.find(x => x.serial === robotId)
+      const mfr = (VDA_BRANDS[amr?.brand ?? 'aiten'] ?? VDA_BRANDS.aiten).manufacturer
+      const charge = amr?.chargeNode
+      if (fs.map && robot?.currentNodeId && charge && robot.currentNodeId !== charge) {
+        // startCharging rides on the destination node so docking + charger-on is one order
+        const order = buildNavOrder(robotId, mfr, fs.map, robot.currentNodeId, charge, 'CHARGE',
+          [{ actionType: 'startCharging' }])
+        if (order) { mqttService.sendOrder(robotId, order); return }
+      }
+      mqttService.sendInstantActions(robotId, buildInstantActions(robotId, mfr, [{ actionType: 'startCharging' }]))
+      return
+    }
     const map: Partial<Record<RobotAction, string>> = {
       PAUSE: 'startPause', RESUME: 'stopPause', CANCEL: 'cancelOrder',
-      CHARGE: 'startCharging', CLEAR_ERR: 'cancelOrder',
+      CLEAR_ERR: 'cancelOrder',
     }
     const actionType = map[a]
     if (!actionType) return

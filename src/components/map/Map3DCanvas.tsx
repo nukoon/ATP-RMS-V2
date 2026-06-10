@@ -17,6 +17,7 @@ import type { FleetMap, Robot, MapViewConfig, MapCurve, AgvModel } from '@/types
 import type { Storage } from '@/types/fleet'
 import { STATUS_COLOR, STATUS_LABEL } from '@/constants'
 import { getMapBounds } from '@/services/map.service'
+import { routeEdges } from '@/services/order.service'
 import { useStorageStore } from '@/store/storage.store'
 import { useFleetStore } from '@/store/fleet.store'
 import { useThemeStore } from '@/store/theme.store'
@@ -341,7 +342,12 @@ export function Map3DCanvas({ map, robots, config, selectedRobotId, onRobotClick
         const c = map.curves.find(e => e.sNode === a && e.eNode === b) ?? map.curves.find(e => e.sNode === b && e.eNode === a)
         let seg: { x: number; y: number }[]
         if (c) { const s = sampleCurve(c); seg = c.sNode === a ? s : s.slice().reverse() }
-        else { const na = nodeById.get(a), nb = nodeById.get(b); if (!na || !nb) continue; seg = [na, nb] }
+        else {
+          // non-adjacent pair (live nodeStates can skip stations) → follow real lanes
+          const via = routeEdges(map, a, b)
+          if (via?.length) { for (const e of via) for (const p of sampleCurve(e)) pts.push(new THREE.Vector3(p.x, 0.09, -p.y)); continue }
+          const na = nodeById.get(a), nb = nodeById.get(b); if (!na || !nb) continue; seg = [na, nb]
+        }
         for (const p of seg) pts.push(new THREE.Vector3(p.x, 0.09, -p.y))
       }
       const clean = pts.filter((p, i) => i === 0 || p.distanceToSquared(pts[i - 1]) > 1e-5)

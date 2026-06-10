@@ -3,7 +3,8 @@
  * Draws: grid, zones, edges (bezier+line), nodes, robot paths, robots
  */
 import { useEffect, useRef, useCallback, useState, type ReactNode } from 'react'
-import type { FleetMap, Robot, MapViewConfig, MapPoint } from '@/types'
+import type { FleetMap, Robot, MapViewConfig, MapPoint, MapCurve } from '@/types'
+import { routeEdges } from '@/services/order.service'
 import type { Storage, Dock, StorageArea, TrafficArea, FieldDevice } from '@/types/fleet'
 import type { Transform } from '@/utils/canvas'
 import { worldToScreen, screenToWorld, thetaToScreenRot } from '@/utils/canvas'
@@ -934,6 +935,37 @@ function drawNodes(ctx: CanvasRenderingContext2D, map: FleetMap, t: Transform, c
   ctx.textBaseline = 'alphabetic'   // reset so other text (storage labels) is unaffected
 }
 
+// Lane route between two NON-adjacent path nodes (a live robot's nodeStates can
+// skip stations, e.g. lastNode LM21 → next remaining LM23). Cached per map — the
+// straight-line fallback drew an off-lane diagonal across the map.
+const gapRoutes = new WeakMap<FleetMap, Map<string, MapCurve[] | null>>()
+function laneGapRoute(map: FleetMap, a: string, b: string): MapCurve[] | null {
+  let cache = gapRoutes.get(map)
+  if (!cache) { cache = new Map(); gapRoutes.set(map, cache) }
+  const key = `${a}>${b}`
+  if (!cache.has(key)) cache.set(key, routeEdges(map, a, b))
+  return cache.get(key) ?? null
+}
+
+// append one map curve to the Path2D in travel direction (fwd = stored s→e order)
+function addCurve(route: Path2D, c: MapCurve, fwd: boolean, t: Transform) {
+  const { sx: ax, sy: ay } = worldToScreen(c.sx, c.sy, t)
+  const { sx: bx, sy: by } = worldToScreen(c.ex, c.ey, t)
+  const p0 = fwd ? { x: ax, y: ay } : { x: bx, y: by }
+  const p1 = fwd ? { x: bx, y: by } : { x: ax, y: ay }
+  route.moveTo(p0.x, p0.y)
+  if (c.type === 'bezier' && c.cp.length >= 2) {
+    const c1 = worldToScreen(c.cp[0].x, c.cp[0].y, t), c2 = worldToScreen(c.cp[1].x, c.cp[1].y, t)
+    if (fwd) route.bezierCurveTo(c1.sx, c1.sy, c2.sx, c2.sy, p1.x, p1.y)
+    else route.bezierCurveTo(c2.sx, c2.sy, c1.sx, c1.sy, p1.x, p1.y)
+  } else if (c.type === 'bezier' && c.cp.length === 1) {
+    const cp = worldToScreen(c.cp[0].x, c.cp[0].y, t)
+    route.quadraticCurveTo(cp.sx, cp.sy, p1.x, p1.y)
+  } else {
+    route.lineTo(p1.x, p1.y)
+  }
+}
+
 function drawRobotPath(ctx: CanvasRenderingContext2D, map: FleetMap, r: Robot, t: Transform, cfg: MapViewConfig) {
   if (!cfg.showPaths || r.path.length < 2) return
   const col = r.color ?? STATUS_COLOR[r.status]   // AMR identity colour
@@ -948,24 +980,12 @@ function drawRobotPath(ctx: CanvasRenderingContext2D, map: FleetMap, r: Robot, t
     const c = map.curves.find(e => e.sNode === a && e.eNode === b)
       ?? map.curves.find(e => (e.sNode === b && e.eNode === a)) // fallback if listed reversed
     if (c) {
-      const { sx: ax, sy: ay } = worldToScreen(c.sx, c.sy, t)
-      const { sx: bx, sy: by } = worldToScreen(c.ex, c.ey, t)
-      // draw in travel order a→b regardless of how the curve is stored
-      const fwd = c.sNode === a
-      const p0 = fwd ? { x: ax, y: ay } : { x: bx, y: by }
-      const p1 = fwd ? { x: bx, y: by } : { x: ax, y: ay }
-      route.moveTo(p0.x, p0.y)
-      if (c.type === 'bezier' && c.cp.length >= 2) {
-        const c1 = worldToScreen(c.cp[0].x, c.cp[0].y, t), c2 = worldToScreen(c.cp[1].x, c.cp[1].y, t)
-        if (fwd) route.bezierCurveTo(c1.sx, c1.sy, c2.sx, c2.sy, p1.x, p1.y)
-        else route.bezierCurveTo(c2.sx, c2.sy, c1.sx, c1.sy, p1.x, p1.y)
-      } else if (c.type === 'bezier' && c.cp.length === 1) {
-        const cp = worldToScreen(c.cp[0].x, c.cp[0].y, t)
-        route.quadraticCurveTo(cp.sx, cp.sy, p1.x, p1.y)
-      } else {
-        route.lineTo(p1.x, p1.y)
-      }
+      addCurve(route, c, c.sNode === a, t)
     } else {
+      // not adjacent → follow the real lanes between them; straight line only
+      // when the map genuinely has no route
+      const via = laneGapRoute(map, a, b)
+      if (via?.length) { for (const seg of via) addCurve(route, seg, true, t); continue }
       const na = map.points.find(p => p.id === a), nb = map.points.find(p => p.id === b)
       if (!na || !nb) continue
       const pa = worldToScreen(na.x, na.y, t), pb = worldToScreen(nb.x, nb.y, t)

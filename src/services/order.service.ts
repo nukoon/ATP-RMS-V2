@@ -31,7 +31,7 @@ function toVdaAction(a: MissionAction): VDA5050Action {
  * unreachable. This is what lets a real robot follow a valid node-by-node route
  * instead of being asked to teleport straight from pickup to dropoff.
  */
-function routeEdges(map: FleetMap, start: string, goal: string): MapCurve[] | null {
+export function routeEdges(map: FleetMap, start: string, goal: string): MapCurve[] | null {
   if (start === goal) return []
   const adj = new Map<string, MapCurve[]>()
   for (const c of map.curves) {
@@ -161,8 +161,9 @@ export function buildVda5050Order(
 
 /**
  * Build a plain navigation Order from the robot's current node to a target node
- * (no pick/drop actions) — used for "go to Park" and auto-park. Returns null when
- * there's no map or no routable path (so the caller can skip sending).
+ * (no pick/drop actions) — used for "go to Park"/auto-park and "go charge".
+ * `prefix` tags the orderId (PARK- orders are preemptible by the dispatcher).
+ * Returns null when there's no map or no routable path (caller skips sending).
  */
 export function buildNavOrder(
   robotId: string,
@@ -170,6 +171,8 @@ export function buildNavOrder(
   map: FleetMap | null,
   fromNode: string,
   toNode: string,
+  prefix = 'PARK',
+  goalActions: InstantActionSpec[] = [],   // VDA5050 actions to run on arrival (e.g. startCharging)
 ): VDA5050Order | null {
   if (!map || !fromNode || !toNode || fromNode === toNode) return null
   const route = routeEdges(map, fromNode, toNode)
@@ -184,9 +187,13 @@ export function buildNavOrder(
     edges.push({ edgeId: `${c.sNode}-${c.eNode}`, sequenceId: (i + 1) * 2 - 1, released: true, startNodeId: c.sNode, endNodeId: c.eNode, actions: [] })
     nodes.push({ nodeId: c.eNode, sequenceId: (i + 1) * 2, released: true, nodePosition: pos(c.eNode), actions: [] })
   })
+  nodes[nodes.length - 1].actions = goalActions.map(a => ({
+    actionType: a.actionType, actionId: uid(),
+    blockingType: a.blockingType ?? 'NONE', actionParameters: a.actionParameters ?? [],
+  }))
   return {
     headerId: headerCounter++, timestamp: new Date().toISOString(), version: VDA5050_VERSION,
-    manufacturer, serialNumber: robotId, orderId: `PARK-${uid()}`, orderUpdateId: 0, nodes, edges,
+    manufacturer, serialNumber: robotId, orderId: `${prefix}-${uid()}`, orderUpdateId: 0, nodes, edges,
   }
 }
 
